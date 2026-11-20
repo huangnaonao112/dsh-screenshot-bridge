@@ -1,6 +1,6 @@
 {
   "name": "dsh-screenshot-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "DeepSeek Harness 截图桥：全局快捷键或鼠标侧键截屏，并把图片发送到指定会话。",
   "type": "module",
   "license": "MIT",
