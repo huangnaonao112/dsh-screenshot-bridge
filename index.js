@@ -7,22 +7,25 @@
  * newest captures, holds the browser half's long poll open until one arrives,
  * serves the bytes, and exposes the live settings the settings card edits.
  *
- * The settings follow the official live-config form: `Config` declares volatile
- * fields, the settings service projects them into a form, the ConfigEditor
- * persists edits into the profile patch, and `loader/volatile-update` tells this
- * half to re-arm the helper. Nothing is stored beside the profile's own config.
+ * The settings card reads `Config` defaults and writes its own
+ * `settings.json` through the route below. That file is independent of the
+ * profile patch, so an installed bundle is editable even when the profile has
+ * no direct config row; `loader/volatile-update` still re-arms the helper when
+ * a profile-level default changes before the first card save.
  *
  * Routes (all under one path, authenticated by the composed `/api` fence):
  *   GET  ?op=state              { settings, running, error, latestSeq }
  *   GET  ?op=wait&since=<seq>   long poll (25s): { latestSeq, captures: [...] }
  *   GET  ?op=image&id=<id>      the PNG bytes of one capture
  *   GET  ?op=diag&data=<text>   append one diagnostics line
+ *   POST ?op=save               merge one validated settings patch
  *
  * @module screenshot-bridge
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { appendFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,6 +53,10 @@ export const Config = z.object({
 
 /** Route the browser half fetches; `/api` is the authenticated prefix. */
 const ROUTE = "/api/screenshot-bridge";
+/** Settings written by the card, independent of the profile's patch document. */
+const SETTINGS_FILE = "settings.json";
+/** Session id shape accepted by the card; an empty value simply disables delivery. */
+const SESSION_ID = /^(?:session-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 /** How long one `op=wait` request may stay open. */
 const WAIT_MS = 25_000;
 /** Newest PNGs kept on disk; older ones are deleted after a capture. */
@@ -59,8 +66,14 @@ const KEEP_ENTRIES = 200;
 
 export function apply(ctx, config) {
   const dir = homePath("screenshot-bridge");
+  const settingsPath = path.join(dir, SETTINGS_FILE);
+  const defaults = readSettings(config);
+  const persisted = readPersistedSettings(settingsPath);
   const state = {
-    settings: readSettings(config),
+    settings: persisted === null ? defaults : mergeSettings(defaults, persisted),
+    hasPersisted: persisted !== null,
+    settingsPath,
+    writeChain: Promise.resolve(),
     dir,
     shots: path.join(dir, "shots"),
     logPath: path.join(dir, "bridge.log"),
@@ -83,7 +96,7 @@ export function apply(ctx, config) {
   ctx.effect(
     () => ctx.connection.fetch.register({
       path: ROUTE,
-      methods: ["GET"],
+      methods: ["GET", "POST"],
       requestBody: "buffered",
       fetch: (request) => serve(request, state, config),
     }),
@@ -153,9 +166,77 @@ function readSettings(config) {
   };
 }
 
+/** Merge one validated settings patch over a complete settings object. */
+function mergeSettings(base, patch) {
+  return { ...base, ...patch };
+}
+
+/**
+ * Validate the fields the browser half may write. Unknown keys are ignored;
+ * a known key with the wrong type rejects the whole patch.
+ */
+function settingsPatch(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const patch = {};
+  let count = 0;
+  if ("enabled" in value) {
+    if (typeof value.enabled !== "boolean") return null;
+    patch.enabled = value.enabled;
+    count += 1;
+  }
+  if ("hotkey" in value) {
+    if (typeof value.hotkey !== "string") return null;
+    const hotkey = value.hotkey.trim();
+    if (hotkey === "" || hotkey.length > 80) return null;
+    patch.hotkey = hotkey;
+    count += 1;
+  }
+  if ("sessionId" in value) {
+    if (typeof value.sessionId !== "string") return null;
+    const sessionId = value.sessionId.trim();
+    if (sessionId !== "" && !SESSION_ID.test(sessionId)) return null;
+    patch.sessionId = sessionId;
+    count += 1;
+  }
+  if ("allScreens" in value) {
+    if (typeof value.allScreens !== "boolean") return null;
+    patch.allScreens = value.allScreens;
+    count += 1;
+  }
+  if ("prompt" in value) {
+    if (typeof value.prompt !== "string") return null;
+    if (value.prompt.length > 20_000) return null;
+    patch.prompt = value.prompt;
+    count += 1;
+  }
+  return count === 0 ? null : patch;
+}
+
+/** Read the card-owned settings file; an absent or malformed file means "use Config defaults". */
+function readPersistedSettings(filename) {
+  try {
+    const value = JSON.parse(readFileSync(filename, "utf8"));
+    return settingsPatch(value);
+  } catch {
+    return null;
+  }
+}
+
+/** Serialize the card writes; the last queued snapshot wins without interleaving temp files. */
+function persistSettings(state, settings) {
+  const text = `${JSON.stringify(publicSettings(settings), null, 2)}\n`;
+  const run = state.writeChain.then(async () => {
+    await mkdir(state.dir, { recursive: true });
+    const temporary = `${state.settingsPath}.tmp`;
+    await writeFile(temporary, text, { mode: 0o600 });
+    await rename(temporary, state.settingsPath);
+  });
+  state.writeChain = run.catch(() => {});
+  return run;
+}
+
 /** Bring the helper in line with the settings just accepted by the Host. */
-function reconcile(state, config) {
-  const next = readSettings(config);
+function applySettings(state, next) {
   const before = state.settings;
   if (
     before.enabled === next.enabled
@@ -179,6 +260,12 @@ function reconcile(state, config) {
   if (!before.enabled || before.hotkey !== next.hotkey || before.allScreens !== next.allScreens) {
     restart(state);
   }
+}
+
+/** Config defaults apply until the card stores its first settings snapshot. */
+function reconcile(state, config) {
+  if (state.hasPersisted) return;
+  applySettings(state, readSettings(config));
 }
 
 function publicSettings(settings) {
@@ -389,6 +476,33 @@ async function pruneShots(state) {
 async function serve(request, state, config) {
   const url = new URL(request.url);
   const op = url.searchParams.get("op") ?? "state";
+
+  if (op === "save") {
+    if (request.method !== "POST") return fail(405, "save requires POST");
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return fail(400, "invalid JSON body");
+    }
+    const patch = settingsPatch(body);
+    if (patch === null) return fail(400, "invalid settings");
+    const next = mergeSettings(state.settings, patch);
+    try {
+      await persistSettings(state, next);
+    } catch (error) {
+      return fail(500, error instanceof Error ? error.message : String(error));
+    }
+    state.hasPersisted = true;
+    applySettings(state, next);
+    void log(state, "settings-save", { settings: publicSettings(next) }).catch(() => {});
+    return json(200, {
+      settings: publicSettings(state.settings),
+      running: state.running,
+      error: state.error,
+      latestSeq: state.seq,
+    });
+  }
 
   if (op === "wait") {
     const since = Number(url.searchParams.get("since") ?? "0");

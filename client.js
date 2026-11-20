@@ -3,8 +3,9 @@
  *
  * One surface:
  *   - a Settings page (`settings.section`) that edits the bridge switch, the
- *     system-wide hotkey and the target conversation id through the official
- *     `ctx.configForms` form, so edits land in the profile's own config.
+ *     system-wide hotkey and the target conversation id. The form supplies
+ *     initial values only; saves go through the Host route into the plugin's
+ *     own `settings.json`, so a bundle-only install stays editable.
  *
  * Delivery long-polls the Host for the next capture, uploads that PNG into the
  * target conversation and sends it. The composer/dialog area stays untouched.
@@ -55,7 +56,6 @@ window.__ModuleLoader__.load({
         invalidSession: "会话 ID 格式不对，应以 session- 开头",
         invalidHotkey: "快捷键格式不对：键盘组合至少需要一个修饰键；鼠标支持 XButton1/XButton2/WheelUp/WheelDown",
         unavailable: "设置服务尚未就绪",
-        readOnly: "当前安装方式下配置只读：请把插件装成 profile 直属行，而不是 bundle 行",
         statusLabel: "运行状态",
         running: "热键已注册，运行中",
         stopped: "热键未注册",
@@ -99,7 +99,6 @@ window.__ModuleLoader__.load({
         invalidSession: "That is not a conversation id; it should start with session-",
         invalidHotkey: "A hotkey needs at least one modifier and one key",
         unavailable: "The settings service is not ready",
-        readOnly: "The config is read-only in this install: mount the plugin as a profile row, not a bundle row",
         statusLabel: "Status",
         running: "hotkey registered, running",
         stopped: "hotkey not registered",
@@ -130,6 +129,8 @@ window.__ModuleLoader__.load({
     /** Last accepted settings; mirrors the Host's live config. */
     var DEFAULT_PROMPT = "我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程";
     var settings = { enabled: true, hotkey: "Alt+Z", sessionId: "", allScreens: false, prompt: DEFAULT_PROMPT };
+    /** Whether the Host route has supplied the authoritative settings file. */
+    var hostSettingsLoaded = false;
     /** Latest Host facts for the status lines. */
     var hostState = { running: false, error: null, latestSeq: 0 };
     /** One shared status line, so any mounted surface can show the newest outcome. */
@@ -277,18 +278,36 @@ window.__ModuleLoader__.load({
       return normalizeHotkey(value) !== null;
     }
 
-    /** Persist one field, retrying a rejected revision once after the form reloads. */
+    /** Persist one field through the Host route, so bundle-only installs work too. */
     async function writeField(field, value) {
-      if (form === null || !formWritable) return false;
-      var ok = await form.set(field, value).catch(function () { return false; });
-      if (ok) return true;
-      await sleep(350);
-      return await form.set(field, value).catch(function () { return false; });
+      for (var attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          var response = await fetch(ROUTE + "?op=save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ [field]: value }),
+          });
+          if (!response.ok) {
+            await sleep(350);
+            continue;
+          }
+          var data = await response.json().catch(function () { return null; });
+          if (data !== null && typeof data === "object" && data.settings !== undefined) {
+            settings = normalizeSettings(data.settings);
+            hostSettingsLoaded = true;
+            notify();
+          }
+          return true;
+        } catch {
+          await sleep(350);
+        }
+      }
+      return false;
     }
 
     /** Persist still-dirty drafts when the user leaves the settings page. */
     function flushDrafts(snapshot) {
-      if (snapshot === null || form === null || !formWritable) return;
+      if (snapshot === null) return;
       if (snapshot.dirtyHotkey && snapshot.hotkey !== settings.hotkey && validHotkey(snapshot.hotkey)) {
         void writeField("hotkey", normalizeHotkey(snapshot.hotkey));
       }
@@ -320,24 +339,21 @@ window.__ModuleLoader__.load({
       var snapshot = form.getSnapshot();
       formStatus = snapshot.status;
       formWritable = snapshot.writable === true;
-      if (snapshot.status === "ready" && snapshot.value !== undefined) {
+      if (!hostSettingsLoaded && snapshot.status === "ready" && snapshot.value !== undefined) {
         settings = normalizeSettings(snapshot.value);
       }
       notify();
     }
 
-    /** Seed the form from values this plugin used to keep in localStorage. */
+    /** Seed the Host from values this plugin used to keep in localStorage. */
     async function migrateStored() {
-      if (form === null || formStatus !== "ready") return;
       var storedHotkey = readStored(HOTKEY_KEY);
       if (storedHotkey !== null && storedHotkey !== "" && storedHotkey !== settings.hotkey && validHotkey(storedHotkey)) {
-        await form.set("hotkey", storedHotkey).catch(function () { return false; });
-        writeStored(HOTKEY_KEY, null);
+        if (await writeField("hotkey", normalizeHotkey(storedHotkey))) writeStored(HOTKEY_KEY, null);
       }
       var storedTarget = readStored(TARGET_KEY);
       if (storedTarget !== null && storedTarget !== "" && settings.sessionId === "" && validSessionId(storedTarget)) {
-        await form.set("sessionId", storedTarget).catch(function () { return false; });
-        writeStored(TARGET_KEY, null);
+        if (await writeField("sessionId", storedTarget)) writeStored(TARGET_KEY, null);
       }
     }
 
@@ -348,6 +364,8 @@ window.__ModuleLoader__.load({
         if (!response.ok) return null;
         var data = await response.json();
         if (data === null || typeof data !== "object") return null;
+        if (data.settings !== undefined) settings = normalizeSettings(data.settings);
+        if (data.settings !== undefined) hostSettingsLoaded = true;
         hostState = {
           running: data.running === true,
           error: typeof data.error === "string" ? data.error : null,
@@ -584,7 +602,7 @@ window.__ModuleLoader__.load({
     function SettingsCard(props) {
       useModuleState();
       var t = typeof props.t === "function" ? props.t : tr;
-      var locked = !formWritable;
+      var locked = false;
 
       var draftHotkey = React.useState(settings.hotkey);
       var hotkey = draftHotkey[0];
@@ -695,10 +713,6 @@ window.__ModuleLoader__.load({
       }, [recording, setHotkey, setRecording]);
 
       async function commitHotkey(value) {
-        if (form === null || !formWritable) {
-          setNote({ level: "error", text: t(form === null ? "unavailable" : "readOnly") });
-          return;
-        }
         var canonical = normalizeHotkey(value);
         if (canonical === null) {
           setNote({ level: "error", text: t("invalidHotkey") });
@@ -724,10 +738,6 @@ window.__ModuleLoader__.load({
       }
 
       async function toggle() {
-        if (form === null || !formWritable) {
-          setNote({ level: "error", text: t(form === null ? "unavailable" : "readOnly") });
-          return;
-        }
         setBusy(true);
         try {
           var ok = await writeField("enabled", !settings.enabled);
@@ -742,10 +752,6 @@ window.__ModuleLoader__.load({
       }
 
       async function commitSession() {
-        if (form === null || !formWritable) {
-          setNote({ level: "error", text: t(form === null ? "unavailable" : "readOnly") });
-          return;
-        }
         var trimmed = session.trim();
         if (trimmed !== "" && !validSessionId(trimmed)) {
           setNote({ level: "error", text: t("invalidSession") });
@@ -771,10 +777,6 @@ window.__ModuleLoader__.load({
       }
 
       async function commitPrompt() {
-        if (form === null || !formWritable) {
-          setNote({ level: "error", text: t(form === null ? "unavailable" : "readOnly") });
-          return;
-        }
         setBusy(true);
         try {
           var ok = await writeField("prompt", prompt);
@@ -941,7 +943,6 @@ window.__ModuleLoader__.load({
           background: settings.allScreens ? "var(--dsw-alias-state-business-primary)" : "var(--dsw-alias-border-l4)",
         },
         onClick: function () {
-          if (form === null || !formWritable) return;
           void writeField("allScreens", !settings.allScreens).then(function (ok) {
             if (!ok) setNote({ level: "error", text: t("saveFailed") });
             void fetchState();
@@ -1024,20 +1025,29 @@ window.__ModuleLoader__.load({
         translate = ctx.locale.bind(NS);
 
         ctx.effect(function () {
-          form = ctx.configForms.get(ENTRY);
-          syncFromForm();
-          var off = form.subscribe(syncFromForm);
-          report("form init " + formStatus + " writable=" + String(form.getSnapshot().writable));
-          void (async function () {
-            var attempts = 0;
-            while (attempts < 20 && formStatus === "loading") {
-              await sleep(300);
-              syncFromForm();
-              attempts += 1;
-            }
-            await migrateStored();
-          })();
-          return function () { off(); };
+          try {
+            form = ctx.configForms.get(ENTRY);
+            if (form === null || form === undefined) throw new Error("config form unavailable");
+            syncFromForm();
+            var off = form.subscribe(syncFromForm);
+            report("form init " + formStatus + " writable=" + String(form.getSnapshot().writable));
+            void (async function () {
+              var attempts = 0;
+              while (attempts < 20 && formStatus === "loading") {
+                await sleep(300);
+                syncFromForm();
+                attempts += 1;
+              }
+              await migrateStored();
+            })();
+            return function () { off(); };
+          } catch (error) {
+            form = null;
+            formStatus = "unavailable";
+            report("form unavailable " + messageOf(error));
+            void migrateStored();
+            return;
+          }
         }, "screenshot-bridge: settings form");
 
         ctx.effect(function () {

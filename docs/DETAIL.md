@@ -7,7 +7,7 @@
 - **系统级快捷键**：独立的 PowerShell 助手调用 Win32 `RegisterHotKey`（键盘）或 `WH_MOUSE_LL` 低级鼠标钩子（侧键/滚轮），所以 DSH 不在前台也能触发。默认 `Alt+Z`；可配置 `Alt+XButton1`、`Ctrl+WheelUp` 等。
 - **截屏**：按下时立即用 GDI 抓屏，存成 PNG；默认抓鼠标所在的那块屏幕，可选整块虚拟桌面。键盘助手在第一次 `WM_HOTKEY` 后自行解除武装，轮询 `GetAsyncKeyState` 等触发键松开后再接受下一次按下；侧键在松开消息后重新武装；滚轮触发后 600ms 冷却。所以长按、连续滚轮都不会连发。
 - **投递**：Host 半把新截图交给浏览器半，后者把图上传成一条带图的用户消息，发进目标对话。
-- **设置卡片**：设置 → 截图桥，用官方即时配置表单（`Config` schema 的 volatile 字段 + `ctx.configForms`）编辑开关、快捷键、会话 ID，以及「截取全部屏幕」「附带文字」。写入落在 profile 的 `cordis.patch.yml`，重启后保持；改键/开关即时重启助手。
+- **设置卡片**：设置 → 截图桥，用 `Config` schema 的 volatile 字段提供默认值，卡片编辑开关、快捷键、会话 ID，以及「截取全部屏幕」「附带文字」。保存写入 `%DSH_HOME%\screenshot-bridge\settings.json`，不依赖 profile 直属行；改键/开关即时重启助手。
 
 ## 设置卡片
 
@@ -27,9 +27,9 @@
 
 ## 实现要点
 
-- Host 半导出 `Config`（schemastery，字段均 `.volatile()`），设置服务据此生成表单；`loader/volatile-update` 触发助手按新配置重启，另有 1.5s 轮询兜底，避免事件丢失。
-- 配置编辑器只接受 profile 根 Include 直接拥有、且 `config` 写在**直属行**上的条目；插件本身由 `dsh.profile.bundles` 加载，`config` 不要写进 `insert`，否则会被判定为被 home patch 覆盖，写入失败。
-- 保存链路：`ConfigFormController.set` → revision 冲突时重试一次；输入失焦、离开设置页（组件卸载）都会把仍为 dirty 的草稿提交，避免「返回没保存」。
+- Host 半导出 `Config`（schemastery，字段均 `.volatile()`）作为首次启动/profile 默认值；卡片通过 `POST /api/screenshot-bridge?op=save` 把校验后的字段写入 `settings.json`，Host 立即重排助手，`loader/volatile-update` 与 1.5s 轮询在尚无 `settings.json` 时兜底。
+- `settings.json` 是卡片保存后的唯一准据；`dsh.profile.bundles` 只负责加载。这样内置插件管理器只加 bundle 行、不建 profile 直属行时，设置仍然可写。可在 profile 的 `cordis.patch.yml` 里放直属 `config` 行作为首次保存前的可选默认值，但保存卡片后不再覆盖。
+- 保存链路：客户端 `writeField` → Host 校验/合并 → 追加串行写临时文件并原子替换；失败重试一次；输入失焦、离开设置页（组件卸载）都会把仍为 dirty 的草稿提交。
 - 投递路径：`createDrafts` → 等上传 → `sessions.using(sessionId)` → `sendSession(..., 'queue')`；失败回滚草稿。
 
 ## 没有做的
