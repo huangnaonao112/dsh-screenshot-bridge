@@ -4,7 +4,15 @@
   "description": "DeepSeek Harness 截图桥：全局快捷键或鼠标侧键截屏，并把图片发送到指定会话。",
   "type": "module",
   "license": "MIT",
-  "author": "dsh-screenshot-bridge contributors",
+  "author": "huangnaonao112",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huangnaonao112/dsh-screenshot-bridge.git"
+  },
+  "homepage": "https://github.com/huangnaonao112/dsh-screenshot-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/huangnaonao112/dsh-screenshot-bridge/issues"
+  },
   "keywords": [
     "deepseek",
     "deepseek-harness",

@@ -10,13 +10,13 @@
 
 ```powershell
 cd ~/.dsh/profiles/<profile>
-npm install github:<github-user>/dsh-screenshot-bridge
+npm install github:huangnaonao112/dsh-screenshot-bridge
 ```
 
 也可以 clone 后本地 link：
 
 ```powershell
-git clone https://github.com/<github-user>/dsh-screenshot-bridge.git C:\src\dsh-screenshot-bridge
+git clone https://github.com/huangnaonao112/dsh-screenshot-bridge.git C:\src\dsh-screenshot-bridge
 cd ~/.dsh/profiles/<profile>
 npm install link:C:/src/dsh-screenshot-bridge
 ```
@@ -26,7 +26,7 @@ npm install link:C:/src/dsh-screenshot-bridge
 ```jsonc
 // ~/.dsh/profiles/<profile>/package.json
 "dependencies": {
-  "dsh-screenshot-bridge": "github:<github-user>/dsh-screenshot-bridge"
+  "dsh-screenshot-bridge": "github:huangnaonao112/dsh-screenshot-bridge"
 },
 "dsh": {
   "profile": {
@@ -103,7 +103,7 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 git init -b main
 git add .
 git commit -m "feat: DeepSeek Harness screenshot bridge"
-git remote add origin https://github.com/<github-user>/dsh-screenshot-bridge.git
+git remote add origin https://github.com/huangnaonao112/dsh-screenshot-bridge.git
 git push -u origin main
 ```
 
@@ -116,4 +116,4 @@ npm login
 npm publish --access public
 ```
 
-发布前把 `package.json` 里的 `author` 改成自己的名字，并按需补充 `repository` / `homepage`。GitHub 安装不需要 npm 发布；`npm install github:<user>/dsh-screenshot-bridge` 即可。
+`package.json` 的 `author` / `repository` / `homepage` 已指向 `huangnaonao112/dsh-screenshot-bridge`；仓库改名时同步更新。GitHub 安装不需要 npm 发布；`npm install github:huangnaonao112/dsh-screenshot-bridge` 即可。
