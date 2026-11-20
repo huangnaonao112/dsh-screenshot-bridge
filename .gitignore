@@ -1,0 +1,16 @@
+# dependencies and local installs
+node_modules/
+
+# runtime/test artifacts
+debug.log
+*.log
+shots/
+bridge.log
+dist/
+*.tmp
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Screenshot bridge",
+    "description": "One system-wide hotkey captures the screen and sends it into a chosen conversation, ready for the model to look at.",
+    "detail": "docs/DETAIL.md"
+  }
+}

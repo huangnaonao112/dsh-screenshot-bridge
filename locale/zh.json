@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "截图桥",
+    "description": "按一个系统级快捷键截下整屏，并自动发到你指定的对话，让模型直接看到屏幕内容。",
+    "detail": "docs/DETAIL.md"
+  }
+}
