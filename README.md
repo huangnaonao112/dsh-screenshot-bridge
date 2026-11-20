@@ -6,35 +6,37 @@
 
 ## 安装
 
-包名是 **`dsh-screenshot-bridge`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
+包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.0.1`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
 
-**方式一：DSH 内置安装器（当前立即可用）**
+**方式一：DSH 内置安装器，输入包名（推荐）**
 
-侧栏 **插件 → 添加插件 → 安装第三方插件**，输入 Git 地址：
-
-```text
-github:huangnaonao112/dsh-screenshot-bridge
-```
-
-或输入完整地址：
-
-```text
-https://github.com/huangnaonao112/dsh-screenshot-bridge
-```
-
-**方式二：npm 包名**
-
-npm 发布之后，在同一对话框输入：
+侧栏 **插件 → 添加插件 → 安装第三方插件**，输入：
 
 ```text
 dsh-screenshot-bridge
 ```
 
+要固定版本可以输入：
+
+```text
+dsh-screenshot-bridge@1.0.1
+```
+
+**方式二：DSH 内置安装器，输入 GitHub 地址**
+
+在同一对话框输入：
+
+```text
+https://github.com/huangnaonao112/dsh-screenshot-bridge
+```
+
+如果安装器提示需要 SSH 凭据，改用方式一的包名；本机 npm 对 `github:` 简写默认会走 SSH，没配公钥会失败。
+
 **方式三：命令行安装**
 
 ```powershell
 cd ~/.dsh/profiles/<profile>
-npm install github:huangnaonao112/dsh-screenshot-bridge
+npm install dsh-screenshot-bridge@1.0.1
 ```
 
 也可以 clone 后本地 link：
@@ -50,7 +52,7 @@ npm install link:C:/src/dsh-screenshot-bridge
 ```jsonc
 // ~/.dsh/profiles/<profile>/package.json
 "dependencies": {
-  "dsh-screenshot-bridge": "github:huangnaonao112/dsh-screenshot-bridge"
+  "dsh-screenshot-bridge": "^1.0.1"
 },
 "dsh": {
   "profile": {
@@ -137,11 +139,11 @@ git push -u origin main
 
 也可以在 GitHub 网页新建空仓库后执行最后两行；如果装了 GitHub CLI，可用 `gh repo create dsh-screenshot-bridge --public --source=. --push`。
 
-如果还想发布到 npm（让用户直接 `npm install dsh-screenshot-bridge`）：
+当前 npm 版本是 `1.0.1`。后续发布：
 
 ```powershell
-npm login
+npm version patch
 npm publish --access public
 ```
 
-`package.json` 的 `author` / `repository` / `homepage` 已指向 `huangnaonao112/dsh-screenshot-bridge`；仓库改名时同步更新。GitHub 安装不需要 npm 发布；`npm install github:huangnaonao112/dsh-screenshot-bridge` 即可。
+npm 已不再提供 Classic / Automation token；直接发布需要账号开启 2FA，或使用带 **Bypass 2FA** 的 Granular Access Token。`package.json` 的 `author` / `repository` / `homepage` 已指向 `huangnaonao112/dsh-screenshot-bridge`；仓库改名时同步更新。GitHub 仓库用于查看源码和提交 issue，安装优先用上面的 npm 包名。
