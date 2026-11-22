@@ -1,4 +1,5 @@
 import { existsSync, rmSync, readdirSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 /**
@@ -9,7 +10,28 @@ import path from "node:path";
  * 只做"删减"，不下载、不改版本；失败一律吞掉，不能因此装不上。
  */
 
-const root = path.resolve(import.meta.dirname, "..", "node_modules", "onnxruntime-node", "bin", "napi-v6");
+/**
+ * 找 onnxruntime-node 的 bin/napi-v6。两种布局都要认：
+ *  - 开发态：<本包>/node_modules/onnxruntime-node
+ *  - 被装进别人项目：onnxruntime-node 会被 npm 提到 <项目>/node_modules，位于 <本包>/../onnxruntime-node
+ */
+function findBin() {
+  const here = import.meta.dirname;
+  const candidates = [
+    path.resolve(here, "..", "node_modules", "onnxruntime-node", "bin", "napi-v6"),
+    path.resolve(here, "..", "..", "onnxruntime-node", "bin", "napi-v6"),
+    path.resolve(here, "..", "..", "..", "onnxruntime-node", "bin", "napi-v6"),
+  ];
+  for (const c of candidates) if (existsSync(c)) return c;
+  try {
+    const pkg = createRequire(import.meta.url).resolve("onnxruntime-node/package.json");
+    const c = path.join(path.dirname(pkg), "bin", "napi-v6");
+    if (existsSync(c)) return c;
+  } catch {}
+  return null;
+}
+
+const root = findBin();
 const dry = process.argv.includes("--dry");
 
 function sizeOf(p) {
