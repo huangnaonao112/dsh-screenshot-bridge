@@ -1,7 +1,7 @@
 {
   "name": "dsh-screenshot-bridge",
-  "version": "1.0.1",
-  "description": "DeepSeek Harness 截图桥：全局快捷键或鼠标侧键截屏，并把图片发送到指定会话。",
+  "version": "1.5.0",
+  "description": "DeepSeek Harness 截图桥：全局快捷键或鼠标侧键截屏，本地把题面和题图拆出来再发送到指定会话。",
   "type": "module",
   "license": "MIT",
   "author": "huangnaonao112",
@@ -37,16 +37,31 @@
   "files": [
     "index.js",
     "client.js",
+    "extract.mjs",
+    "engine.mjs",
+    "test-suite.mjs",
+    "test-matrix.mjs",
+    "extract.py",
+    "scripts/*.mjs",
+    "testdata/*.png",
+    "models/*.onnx",
+    "models/*.txt",
     "hotkey.ps1",
     "cordis.patch.yml",
     "locale/*.json",
     "docs/DETAIL.md",
+    "docs/MODELS-LICENSES.md",
     "icon.svg",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check client.js"
+    "postinstall": "node scripts/postinstall.mjs",
+    "check": "node --check index.js && node --check client.js && node --check extract.mjs && node --check engine.mjs",
+    "test": "node test-suite.mjs",
+    "matrix": "node test-matrix.mjs",
+    "models:medium": "node scripts/fetch-models.mjs --medium",
+    "prune": "node scripts/prune-onnxruntime.mjs"
   },
   "dsh": {
     "bundle": {
@@ -64,5 +79,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/schemastery": "^3.19.0"
+  },
+  "dependencies": {
+    "rapidocr-node": "^0.1.1",
+    "sharp": "^0.35.5"
   }
 }

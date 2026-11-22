@@ -17,6 +17,7 @@
  *   GET  ?op=state              { settings, running, error, latestSeq }
  *   GET  ?op=wait&since=<seq>   long poll (25s): { latestSeq, captures: [...] }
  *   GET  ?op=image&id=<id>      the PNG bytes of one capture
+ *   GET  ?op=extract&id=<id>    question text pulled out of one capture
  *   GET  ?op=diag&data=<text>   append one diagnostics line
  *   POST ?op=save               merge one validated settings patch
  *
@@ -25,7 +26,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { appendFile, mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,8 @@ export const Config = z.object({
   sessionId: z.string().default("").volatile().description("Target conversation id; required for delivery"),
   allScreens: z.boolean().default(false).volatile().description("Capture every display instead of the display under the pointer"),
   prompt: z.string().default(DEFAULT_PROMPT).volatile().description("Text sent with each screenshot; {time} becomes the local clock"),
+  mode: z.union([z.const("image"), z.const("extract")]).default("extract").volatile()
+    .description("image: send the screenshot itself; extract: send locally extracted question text plus its figures"),
 });
 
 /** Route the browser half fetches; `/api` is the authenticated prefix. */
@@ -75,6 +78,7 @@ export function apply(ctx, config) {
     settingsPath,
     writeChain: Promise.resolve(),
     dir,
+    home: path.dirname(dir),
     shots: path.join(dir, "shots"),
     logPath: path.join(dir, "bridge.log"),
     running: false,
@@ -86,6 +90,8 @@ export function apply(ctx, config) {
     captures: [],
     waiters: new Set(),
     restartTimer: null,
+    extracts: new Map(),
+    python: null,
   };
 
   if (process.platform !== "win32") {
@@ -163,6 +169,7 @@ function readSettings(config) {
     sessionId: String(live(config.sessionId, "")).trim(),
     allScreens: live(config.allScreens, false) === true,
     prompt: String(live(config.prompt, DEFAULT_PROMPT)),
+    mode: live(config.mode, "extract") === "image" ? "image" : "extract",
   };
 }
 
@@ -209,6 +216,17 @@ function settingsPatch(value) {
     patch.prompt = value.prompt;
     count += 1;
   }
+  if ("mode" in value) {
+    if (value.mode !== "image" && value.mode !== "extract") return null;
+    patch.mode = value.mode;
+    count += 1;
+  }
+  // Legacy alias: the old boolean still works, it just picks the same two modes.
+  if ("extract" in value) {
+    if (typeof value.extract !== "boolean") return null;
+    patch.mode = value.extract ? "extract" : "image";
+    count += 1;
+  }
   return count === 0 ? null : patch;
 }
 
@@ -244,11 +262,18 @@ function applySettings(state, next) {
     && before.sessionId === next.sessionId
     && before.allScreens === next.allScreens
     && before.prompt === next.prompt
+    && before.mode === next.mode
   ) {
     return;
   }
   state.settings = next;
-  void log(state, "settings", { settings: publicSettings(next) }).catch(() => {});
+  void log(state, "settings-applied", {
+    enabled: next.enabled,
+    hotkey: next.hotkey,
+    allScreens: next.allScreens,
+    mode: next.mode,
+    sessionIdSet: next.sessionId !== "",
+  }).catch(() => {});
 
   if (!next.enabled) {
     if (state.restartTimer !== null) clearTimeout(state.restartTimer);
@@ -275,6 +300,8 @@ function publicSettings(settings) {
     sessionId: settings.sessionId,
     allScreens: settings.allScreens,
     prompt: settings.prompt,
+    mode: settings.mode,
+    extract: settings.mode === "extract",
   };
 }
 
@@ -469,6 +496,172 @@ async function pruneShots(state) {
   names.sort();
   const extra = names.slice(0, names.length - KEEP_SHOTS);
   await Promise.all(extra.map((entry) => unlink(path.join(state.shots, entry)).catch(() => {})));
+  void pruneFigures(state).catch(() => {});
+}
+
+/** Cropped figures live one folder per capture; keep the newest ones only. */
+async function pruneFigures(state) {
+  const root = path.join(state.dir, "figs");
+  let names;
+  try {
+    names = await readdir(root);
+  } catch {
+    return;
+  }
+  if (names.length <= KEEP_SHOTS) return;
+  const entries = (await Promise.all(names.map(async (name) => {
+    try {
+      const info = await stat(path.join(root, name));
+      return { name, at: info.mtimeMs };
+    } catch {
+      return null;
+    }
+  }))).filter((entry) => entry !== null);
+  entries.sort((left, right) => right.at - left.at);
+  await Promise.all(entries.slice(KEEP_SHOTS).map((entry) => rm(path.join(root, entry.name), { recursive: true, force: true }).catch(() => {})));
+}
+
+/* ------------------------------------------------------------------ extract */
+
+/** Locate one capture by id, or by the file-name suffix the browser may pass. */
+function findCapture(state, id) {
+  return state.captures.find((entry) => entry.id === id)
+    ?? state.captures.find((entry) => entry.path.endsWith(id));
+}
+
+/** Interpreters worth trying, most specific first. `DSH_PYTHON` wins. */
+function pythonCandidates() {
+  const list = [];
+  if (process.env.DSH_PYTHON) list.push([process.env.DSH_PYTHON]);
+  const local = process.env.LOCALAPPDATA;
+  if (local) list.push([path.join(local, "Programs", "Python", "Launcher", "py.exe"), "-3"]);
+  list.push(["python"]);
+  list.push(["py", "-3"]);
+  return list;
+}
+
+/**
+ * One extractor run: the child prints a single JSON line on stdout and puts
+ * engine logs on stderr, so stdout is the whole contract. Node is the default
+ * engine; Python stays as the developer fallback.
+ */
+function execExtract(argv, scriptPath, imagePath, figuresDir, extraEnv) {
+  return new Promise((resolve, reject) => {
+    const args = [...argv.slice(1), scriptPath, imagePath];
+    if (figuresDir !== null) args.push(figuresDir);
+    const child = spawn(argv[0], args, {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", ...extraEnv },
+    });
+    let out = "";
+    let err = "";
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+        // already gone
+      }
+      reject(new Error("extract timed out"));
+    }, 30_000);
+    child.stdout.on("data", (chunk) => {
+      out += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      err += String(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", () => {
+      clearTimeout(timer);
+      const lines = out.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const line = lines[index];
+        if (!line.startsWith("{")) continue;
+        try {
+          resolve(JSON.parse(line));
+          return;
+        } catch {
+          // keep looking upward for the payload line
+        }
+      }
+      reject(new Error(`extract printed no JSON (${err.trim().slice(-200)})`));
+    });
+  });
+}
+
+/** Extract once per capture; the browser half may ask twice (poll retries). */
+async function runExtract(state, capture) {
+  const cached = state.extracts.get(capture.id);
+  if (cached !== undefined) return cached;
+
+  const job = (async () => {
+    const figuresDir = path.join(state.dir, "figs", capture.id);
+    await mkdir(figuresDir, { recursive: true }).catch(() => {});
+
+    // 1) 默认：同一个 Node 运行时跑 extract.mjs（依赖装在本插件里，用户不用装任何东西）。
+    const nodeScript = fileURLToPath(new URL("./extract.mjs", import.meta.url));
+    const nodeBin = process.env.DSH_NODE && process.env.DSH_NODE.trim() !== ""
+      ? process.env.DSH_NODE
+      : process.execPath;
+    try {
+      const result = await execExtract([nodeBin], nodeScript, capture.path, figuresDir, {
+        // 模型缓存放到插件自己的运行目录，避免写到用户 home 里乱七八糟的地方
+        DSH_HOME: state.home ?? process.env.DSH_HOME ?? "",
+      });
+      if (typeof result.ok === "boolean") {
+        result.engine = "node";
+        return result;
+      }
+    } catch (error) {
+      void log(state, "extract-node-failed", {
+        reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
+      }).catch(() => {});
+    }
+
+    // 2) 兜底：开发机上的 Python（显式关闭用 DSH_EXTRACT_PYTHON=0）。
+    if (process.env.DSH_EXTRACT_PYTHON === "0") return { ok: false, reason: "no-engine" };
+    const script = fileURLToPath(new URL("./extract.py", import.meta.url));
+    const candidates = state.python === null ? pythonCandidates() : [state.python];
+    let last = { ok: false, reason: "no-python" };
+    for (const candidate of candidates) {
+      try {
+        const result = await execExtract(candidate, script, capture.path, figuresDir, {});
+        if (typeof result.reason === "string" && result.reason.startsWith("engine-unavailable")) {
+          last = result;
+          continue;
+        }
+        state.python = candidate;
+        result.engine = "python";
+        return result;
+      } catch (error) {
+        last = { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    return last;
+  })();
+
+  state.extracts.set(capture.id, job);
+  while (state.extracts.size > 40) {
+    const oldest = state.extracts.keys().next().value;
+    if (oldest === undefined) break;
+    state.extracts.delete(oldest);
+  }
+  const result = await job;
+  state.extracts.set(capture.id, result);
+  void log(state, "extract", {
+    id: capture.id,
+    engine: result.engine ?? null,
+    ok: result.ok === true,
+    mode: result.mode ?? null,
+    reason: result.reason ?? null,
+    chars: typeof result.text === "string" ? result.text.length : 0,
+    figures: Array.isArray(result.figures) ? result.figures.length : 0,
+    suspect: typeof result.suspect === "number" ? result.suspect : 0,
+  }).catch(() => {});
+  return result;
 }
 
 /* ------------------------------------------------------------------- route */
@@ -495,7 +688,8 @@ async function serve(request, state, config) {
     }
     state.hasPersisted = true;
     applySettings(state, next);
-    void log(state, "settings-save", { settings: publicSettings(next) }).catch(() => {});
+    // 只记这次真正改动的键，别把整份设置都打一遍，看着像"顺手重存了会话"。
+    void log(state, "settings-save", { changed: Object.keys(patch), patch }).catch(() => {});
     return json(200, {
       settings: publicSettings(state.settings),
       running: state.running,
@@ -524,11 +718,54 @@ async function serve(request, state, config) {
     });
   }
 
+  if (op === "extract") {
+    const id = url.searchParams.get("id");
+    if (id === null || id === "") return fail(400, "missing id");
+    const capture = findCapture(state, id);
+    if (capture === undefined) return fail(404, "capture expired");
+    if (state.settings.mode !== "extract") return json(200, { ok: false, reason: "mode is image" });
+    try {
+      const result = await runExtract(state, capture);
+      return json(200, result);
+    } catch (error) {
+      return fail(500, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  // One cropped figure straight out of the last extraction, so the browser half
+  // can attach it to the text it is about to send.
+  if (op === "figure") {
+    const id = url.searchParams.get("id");
+    const n = Number(url.searchParams.get("n"));
+    if (id === null || id === "") return fail(400, "missing id");
+    if (!Number.isInteger(n) || n < 1 || n > 99) return fail(400, "bad figure number");
+    const capture = findCapture(state, id);
+    if (capture === undefined) return fail(404, "capture expired");
+    try {
+      const result = await runExtract(state, capture);
+      const entry = (Array.isArray(result.figures) ? result.figures : []).find((item) => item.n === n);
+      if (entry === undefined || typeof entry.file !== "string") return fail(404, "figure missing");
+      const root = path.resolve(state.dir, "figs");
+      if (!path.resolve(entry.file).startsWith(root)) return fail(400, "figure outside the shot directory");
+      const bytes = await readFile(entry.file);
+      return new Response(request.method === "HEAD" ? null : bytes, {
+        status: 200,
+        headers: {
+          "Cache-Control": "private, max-age=60",
+          "Content-Type": "image/png",
+          "Content-Length": String(bytes.byteLength),
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    } catch (error) {
+      return fail(404, error instanceof Error ? error.message : String(error));
+    }
+  }
+
   if (op === "image") {
     const id = url.searchParams.get("id");
     if (id === null || id === "") return fail(400, "missing id");
-    const capture = state.captures.find((entry) => entry.id === id)
-      ?? state.captures.find((entry) => entry.path.endsWith(id));
+    const capture = findCapture(state, id);
     if (capture === undefined) return fail(404, "capture expired");
     try {
       const bytes = await readFile(capture.path);

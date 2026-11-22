@@ -63,6 +63,13 @@ window.__ModuleLoader__.load({
         errorState: "错误：{message}",
         allScreensLabel: "截取全部屏幕",
         allScreensHint: "默认只截鼠标所在的那块屏幕。",
+        modeLabel: "截图怎么给模型",
+        modeHint: "两个方案随时切换：直接发截图，或发「原截图 + 本地识别出的文字」。文字只当辅助，出错以截图为准；认不出文字就只发截图。",
+        modeImage: "直接发截图",
+        modeExtract: "原截图 + 文字",
+        modeImageNote: "已切换：直接发截图",
+        modeExtractNote: "已切换：原截图 + 文字",
+        modeFailed: "切换没写进去：当前运行的可能还是旧版 Host，重启 DSH 后再点一次",
         promptLabel: "附带文字",
         promptHint: "随截图一起发送；可用 {time} 插入本地时间。改完点「保存」生效。",
         promptPlaceholder: "输入随截图发送的文字，例如：按截图里的题目顺序给出答案",
@@ -106,6 +113,13 @@ window.__ModuleLoader__.load({
         errorState: "error: {message}",
         allScreensLabel: "Capture every display",
         allScreensHint: "Off captures only the display under the pointer.",
+        modeLabel: "What the model receives",
+        modeHint: "Switch any time: the screenshot alone, or the screenshot plus text recognised locally. The text is a helper only — the picture wins; if nothing is recognised, the picture goes alone.",
+        modeImage: "Send the screenshot",
+        modeExtract: "Extract first",
+        modeImageNote: "Switched: send the screenshot",
+        modeExtractNote: "Switched: screenshot + text",
+        modeFailed: "The switch did not stick: the running Host may still be the old build — restart DSH and try again",
         promptLabel: "Message text",
         promptHint: "Sent with the capture; {time} inserts the local clock. Save to apply.",
         promptPlaceholder: "Text to send with the screenshot, e.g. answer the questions in order",
@@ -128,7 +142,7 @@ window.__ModuleLoader__.load({
     var formWritable = false;
     /** Last accepted settings; mirrors the Host's live config. */
     var DEFAULT_PROMPT = "我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程";
-    var settings = { enabled: true, hotkey: "Alt+Z", sessionId: "", allScreens: false, prompt: DEFAULT_PROMPT };
+    var settings = { enabled: true, hotkey: "Alt+Z", sessionId: "", allScreens: false, prompt: DEFAULT_PROMPT, mode: "extract", extract: true };
     /** Whether the Host route has supplied the authoritative settings file. */
     var hostSettingsLoaded = false;
     /** Latest Host facts for the status lines. */
@@ -305,23 +319,7 @@ window.__ModuleLoader__.load({
       return false;
     }
 
-    /** Persist still-dirty drafts when the user leaves the settings page. */
-    function flushDrafts(snapshot) {
-      if (snapshot === null) return;
-      if (snapshot.dirtyHotkey && snapshot.hotkey !== settings.hotkey && validHotkey(snapshot.hotkey)) {
-        void writeField("hotkey", normalizeHotkey(snapshot.hotkey));
-      }
-      if (snapshot.dirtySession && snapshot.session.trim() !== settings.sessionId) {
-        var raw = snapshot.session.trim();
-        if (raw === "" || validSessionId(raw)) {
-          void writeField("sessionId", /^[0-9a-f]{8}-/iu.test(raw) ? "session-" + raw : raw);
-        }
-      }
-      if (snapshot.dirtyPrompt && snapshot.prompt !== settings.prompt) {
-        void writeField("prompt", snapshot.prompt);
-      }
-    }
-
+    /** 输入框失焦不再自动提交：只有回车或「保存」按钮才写，免得点别的开关时被顺手写进去。 */
     function normalizeSettings(value) {
       var raw = value !== null && typeof value === "object" ? value : {};
       return {
@@ -330,6 +328,12 @@ window.__ModuleLoader__.load({
         sessionId: typeof raw.sessionId === "string" ? raw.sessionId.trim() : "",
         allScreens: raw.allScreens === true,
         prompt: typeof raw.prompt === "string" ? raw.prompt : DEFAULT_PROMPT,
+        // `mode` is the switch the card edits; `extract` stays as the legacy alias
+        // older settings files (and the Host) still carry.
+        mode: raw.mode === "image" || raw.mode === "extract"
+          ? raw.mode
+          : (raw.extract === false ? "image" : "extract"),
+        extract: (raw.mode === "image" || raw.mode === "extract" ? raw.mode : (raw.extract === false ? "image" : "extract")) === "extract",
       };
     }
 
@@ -424,12 +428,121 @@ window.__ModuleLoader__.load({
       });
     }
 
+    /**
+     * Ask the Host to turn one capture into question text. Any failure here is
+     * a normal outcome: the caller falls back to sending the PNG itself.
+     */
+    async function extractQuestions(capture) {
+      try {
+        var response = await fetch(ROUTE + "?op=extract&id=" + encodeURIComponent(capture.id));
+        if (!response.ok) {
+          report("extract http " + String(response.status));
+          return null;
+        }
+        var payload = await response.json();
+        if (payload === null || payload.ok !== true || typeof payload.text !== "string" || payload.text.trim() === "") {
+          report("extract skipped: " + String(payload !== null && payload.reason ? payload.reason : "empty"));
+          return null;
+        }
+        return payload;
+      } catch (error) {
+        report("extract failed: " + messageOf(error));
+        return null;
+      }
+    }
+
+    /** Fetch the original screenshot as a draft-ready file; null when unavailable. */
+    async function fetchShot(capture) {
+      try {
+        var response = await fetch(ROUTE + "?op=image&id=" + encodeURIComponent(capture.id));
+        if (!response.ok) {
+          report("image " + String(response.status));
+          return null;
+        }
+        var blob = await response.blob();
+        if (blob.size === 0) return null;
+        return new window.File([blob], "screenshot-" + stamp() + ".png", { type: "image/png" });
+      } catch (error) {
+        report("image failed: " + messageOf(error));
+        return null;
+      }
+    }
+
+    /** Pull the figures the extractor cropped, as draft-ready files. */
+    async function extractFigures(capture, figures) {
+      var list = Array.isArray(figures) ? figures : [];
+      var files = [];
+      for (var index = 0; index < list.length && files.length < 8; index += 1) {
+        var n = list[index].n;
+        if (typeof n !== "number") continue;
+        try {
+          var response = await fetch(ROUTE + "?op=figure&id=" + encodeURIComponent(capture.id) + "&n=" + String(n));
+          if (!response.ok) {
+            report("figure " + String(n) + " http " + String(response.status));
+            continue;
+          }
+          var blob = await response.blob();
+          if (blob.size === 0) continue;
+          files.push(new window.File([blob], "图" + String(n) + ".png", { type: "image/png" }));
+        } catch (error) {
+          report("figure " + String(n) + " failed: " + messageOf(error));
+        }
+      }
+      return files;
+    }
+
     /** Fetch one capture, stage it as an image draft, and send it to the target. */
     async function deliver(ctx, capture) {
       var target = settings.sessionId;
       if (target === "") {
         publish(tr("noTargetHint"), "error");
         return;
+      }
+
+      // "extract" 模式：**原截图一定要发**，本地认出来的文字只当辅助一起附上。
+      // 认不出来（空文本）就退化成只发图，不会让截图发不出去。
+      if (settings.mode === "extract") {
+        var extracted = await extractQuestions(capture);
+        var shotFile = await fetchShot(capture);
+        if (shotFile !== null) {
+          var composed = promptText();
+          var text = extracted !== null && typeof extracted.text === "string" ? extracted.text.trim() : "";
+          if (text !== "") {
+            composed += "\n\n下面是从截图里认出来的文字（可能有错字、漏行、顺序错乱，仅供你参考和复制；"
+              + "内容以附上的原截图为准）：\n" + text;
+            var notes = Array.isArray(extracted.warnings) ? extracted.warnings : [];
+            if (notes.length > 0) {
+              composed += "\n\n本地校验没对上的地方（以截图为准，必要时回头看一眼整页）：\n- "
+                + notes.slice(0, 6).join("\n- ");
+            }
+          }
+          var drafts = null;
+          try {
+            var ids = [];
+            drafts = ctx.conversation.createDrafts(target, [shotFile], true);
+            ids = drafts.map(function (draft) { return draft.id; });
+            await waitForUploads(ctx, ids);
+            var textOutcome = await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
+              return await ctx.conversation.sendSession(reference.binding.session, composed, ids, "queue");
+            });
+            if (textOutcome !== undefined && textOutcome !== null && textOutcome.kind === "error") {
+              throw new Error(textOutcome.text || "conversation rejected the message");
+            }
+            publish(tr("sent", { time: clock() }), "info");
+            return;
+          } catch (error) {
+            if (drafts !== null) {
+              try {
+                ctx.conversation.releaseDraftAttachments(drafts);
+              } catch {
+                // already released by the accepted submission
+              }
+            }
+            report("text+shot send failed, falling back to plain image: " + messageOf(error));
+          }
+        } else if (extracted !== null) {
+          report("screenshot unavailable, sending text only");
+        }
       }
 
       var response = await fetch(ROUTE + "?op=image&id=" + encodeURIComponent(capture.id));
@@ -652,7 +765,11 @@ window.__ModuleLoader__.load({
         dirtyPrompt: dirtyPrompt.current,
       };
       React.useEffect(function () {
-        return function () { flushDrafts(draftSnapshot.current); };
+        // 只保留一份草稿快照给"离开设置页"的收尾用；不在这里自动提交，
+        // 免得点别的开关时把没按保存的会话/提示词一起写进去。
+        return function () {
+          draftSnapshot.current = null;
+        };
       }, []);
 
       React.useEffect(function () {
@@ -776,6 +893,32 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Flip the delivery switch: image straight through, or extract first. */
+      async function commitMode(value) {
+        var before = settings.mode;
+        // 先改本地状态，按钮立刻有反馈；写失败再翻回去。
+        settings = { ...settings, mode: value, extract: value === "extract" };
+        notify();
+        setBusy(true);
+        try {
+          var ok = await writeField("mode", value);
+          if (!ok) {
+            settings = { ...settings, mode: before, extract: before === "extract" };
+            notify();
+            setNote({ level: "error", text: t("modeFailed") });
+            return;
+          }
+          setNote({ level: "ok", text: value === "image" ? t("modeImageNote") : t("modeExtractNote") });
+          void fetchState();
+        } catch (error) {
+          settings = { ...settings, mode: before, extract: before === "extract" };
+          notify();
+          setNote({ level: "error", text: messageOf(error) });
+        } finally {
+          setBusy(false);
+        }
+      }
+
       async function commitPrompt() {
         setBusy(true);
         try {
@@ -888,9 +1031,6 @@ window.__ModuleLoader__.load({
         onKeyDown: function (event) {
           if (event.key === "Enter") void commitHotkey(hotkey);
         },
-        onBlur: function () {
-          if (!recording && dirtyHotkey.current) void commitHotkey(hotkey);
-        },
         style: { ...INPUT_STYLE, width: "min(210px, 100%)", fontVariantNumeric: "tabular-nums" },
       }),
       React.createElement("button", {
@@ -919,9 +1059,6 @@ window.__ModuleLoader__.load({
         },
         onKeyDown: function (event) {
           if (event.key === "Enter") void commitSession();
-        },
-        onBlur: function () {
-          if (dirtySession.current) void commitSession();
         },
         style: { ...INPUT_STYLE, flex: "1 1 180px", width: "min(320px, 100%)", maxWidth: "100%", minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: "12px" },
       }),
@@ -954,6 +1091,44 @@ window.__ModuleLoader__.load({
           width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
         },
       }))),
+
+      row(t("modeLabel"), t("modeHint"), React.createElement("div", {
+        style: { display: "flex", alignItems: "center" },
+      },
+      React.createElement("button", {
+        type: "button",
+        disabled: busy || locked,
+        "aria-pressed": settings.mode === "image",
+        style: {
+          padding: "4px 12px", fontSize: "12px", lineHeight: "20px",
+          cursor: (busy || locked) ? "default" : "pointer",
+          border: "0.5px solid var(--dsw-alias-border-l3)",
+          borderRight: "none", borderRadius: "6px 0 0 6px",
+          background: settings.mode === "image" ? "var(--dsw-alias-state-business-primary)" : "transparent",
+          color: settings.mode === "image" ? "#fff" : "var(--dsw-alias-label-secondary)",
+          fontWeight: settings.mode === "image" ? 600 : 400,
+        },
+        onClick: function () {
+          if (settings.mode !== "image") void commitMode("image");
+        },
+      }, t("modeImage")),
+      React.createElement("button", {
+        type: "button",
+        disabled: busy || locked,
+        "aria-pressed": settings.mode === "extract",
+        style: {
+          padding: "4px 12px", fontSize: "12px", lineHeight: "20px",
+          cursor: (busy || locked) ? "default" : "pointer",
+          border: "0.5px solid var(--dsw-alias-border-l3)",
+          borderRadius: "0 6px 6px 0",
+          background: settings.mode === "extract" ? "var(--dsw-alias-state-business-primary)" : "transparent",
+          color: settings.mode === "extract" ? "#fff" : "var(--dsw-alias-label-secondary)",
+          fontWeight: settings.mode === "extract" ? 600 : 400,
+        },
+        onClick: function () {
+          if (settings.mode !== "extract") void commitMode("extract");
+        },
+      }, t("modeExtract")))),
 
       row(t("promptLabel"), t("promptHint"), React.createElement("div", {
         style: {

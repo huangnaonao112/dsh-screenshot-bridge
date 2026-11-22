@@ -6,7 +6,7 @@
 
 ## 安装
 
-包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.0.1`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
+包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.2.3`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
 
 **方式一：DSH 内置安装器，输入包名（推荐）**
 
@@ -105,6 +105,32 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 - DSH 关闭期间按快捷键，截图仍会生成；重开应用后不会把积压的图补发进对话。
 - 关闭开关后助手退出，不再投递；对话框下面不会出现任何插件控件，全部配置只在设置卡片里。
 
+## 题面提取（可选，设置卡片里二选一）
+
+截图里常常既有题目又有水印、侧栏、倒计时、摄像头小窗、按钮。两个方案同时保留，卡片上「截图怎么给模型」一键切换：
+
+- **直接发截图**：和以前一样，把 PNG 原图发给模型。
+- **原截图 + 文字**：**原图一定发**，本地再附一份从图里认出来的文字。文字只当辅助（可复制、可搜索、少读错字），**内容以截图为准**；一个字都没认出来就只发截图。这一步完全离线、不用任何大模型，也不改写原文。
+
+> 为什么要改成"原图必发"：实测 18 张真实网页截图（力扣、洛谷、Codeforces、无忧考网、PDF 真题页），结构切题只对"题号 + A/B/C/D"这一族题库版式成立，编程题站和文档预览页切出来只剩几个字。原图始终在，覆盖率就永远是 100%。
+
+- 引擎是 `extract.mjs`（RapidOCR 的 Node 实现 + 版面规则）。**用户不需要装 Python，也不需要装任何东西**：`npm install` 会把 `rapidocr-node`、`onnxruntime-node`、`sharp` 一起装好，PP-OCRv6 模型（约 30 MB）随仓库自带在 `models/`。
+- 依赖体积：`onnxruntime-node` 装完约 287 MB（含 macOS / Linux / win32 各平台二进制；实际用到的是 `bin\napi-v6\win32` 那一份）。纯 npm 分发，没有 exe，也没有杀软提示。
+- 运行方式：Host 用**自己这个 Node 运行时**（DSH 的 `node.exe`，v24）起一个子进程跑 `extract.mjs`，所以不会卡住界面；同一次截图只跑一次，结果在内存里缓存。
+- 开发机兜底：`extract.py` 仍然保留，Node 引擎起不来时会退到本机 Python（要关掉就设 `DSH_EXTRACT_PYTHON=0`）。
+- 两种模式：`mode=list/single` 是"题号 + 选项"版式，输出切好的题；`mode=raw` 是这页没有题库结构（力扣/洛谷/文档预览），自动改成按阅读顺序输出整页文字。判定：整页文字量 ≥120 字、而切题结果不到它的 60% 时，自动走 `raw`。
+- Host 路由：
+  - `GET ?op=extract&id=<capture>` → `{ok, engine, mode, text, questions, figures, gaps, stats}`；同一张图只算一次（内存缓存）。
+  - `GET ?op=figure&id=<capture>&n=<序号>` → 该次提取裁出的第 n 张题图（PNG 字节，只允许读 `figs/` 下面）。**这张裁图默认不再单独发送**（原图里已经有），接口留着给别的用途/调试。
+- 发送顺序：取原截图 + 取文字 → 一次发出「原截图 + 附带文字 + 识别文字」；任何一步失败（超时、引擎起不来、对话拒收）就**自动回退成只发原截图**，不会让截图发不出去。
+- 单张耗时约 2–3 秒（含加载模型，子进程每次都要加载一次）；嫌慢就切回「直接发截图」。
+- 已认过的版式：题库网站的纵向长图（多益在线笔试、aypta、无后束）、**Chrome 内置 PDF 阅读器的真题页**（深灰外框 + 白纸页 + PDF 工具栏 + `第15页/共24页` 页脚）、深色主题反色页、左侧带答题卡栏、右侧带客服/二维码浮窗。PDF 页的工具栏、权限提示条、"本试卷由 xx 提供"页脚当杂项剔掉；同一行并排写的 `A.…B.…C.…D.…` 会按选项标记切开，各占一行。
+- 截图 PNG 有时带 alpha 通道（4 通道）。取色前会先剥成 3 通道，否则白纸页会被错判成"一片高饱和色块"，整行正文被当成按钮丢掉。
+- 列选择按"这一列的文字总量"量，不按汉字占比（英文页面汉字占比是 0）；单个像题号的行（洛谷右上角的 `P1001`）不再能抢走整列。
+- 题图裁切：**先把 OCR 已经认出来的字整块涂掉**，剩下的墨迹才是"图"——这样整段文字不会和旁边的图粘成一块。然后按墨迹找连通块、把上下相邻和**并排的**块都粘起来 → 甩掉横条/过小/过稀的 → 按上方最近题号归档，外扩约一个字高存 PNG（碰到上下相邻文字行之前收住，不会把题干残字带进画里）。
+- 认漏了怎么办：题号整个没认出来（只剩"根据上述定义…"这种长句）按顺序补成 `4、（补号）…`；选项字母被吞（只剩 `②⑤⑥` 这种内容）按字母顺序补成 `B、（补号）②⑤⑥`。带（补号）的都是推断出来的，不是图上原样看到的。
+- 模型许可：PP-OCRv6 检测/识别模型与字典来自 RapidOCR，见 [`docs/MODELS-LICENSES.md`](docs/MODELS-LICENSES.md)。
+
 ## 配置字段
 
 | 键 | 默认 | 含义 |
@@ -113,9 +139,36 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 | `hotkey` | `Alt+Z` | 全局快捷键；也可填鼠标侧键/滚轮，如 `Alt+XButton1`、`Ctrl+WheelUp` |
 | `sessionId` | 空 | 固定投递的会话 id；留空不会投递 |
 | `allScreens` | `false` | 截整块虚拟桌面而非鼠标所在屏幕 |
-| `prompt` | `我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程` | 随图发送的文字，`{time}` 替换为本地时间；清空则只发图 |
+| `prompt` | `我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程` | 随截图发送的文字，`{time}` 替换为本地时间；清空则只发图 |
+| `mode` | `extract` | `image` = 直接发截图；`extract` = 本地提取题面文本 + 题图后发送 |
+| `extract` | `true` | 旧布尔别名，等价于 `mode` 的两种取值，仅为兼容旧设置文件 |
 
-诊断日志：`%DSH_HOME%\screenshot-bridge\bridge.log`。卡片设置：`%DSH_HOME%\screenshot-bridge\settings.json`。Host 路由：`/api/screenshot-bridge`，`op ∈ {state, wait, image, diag, save}`。
+诊断日志：`%DSH_HOME%\screenshot-bridge\bridge.log`。卡片设置：`%DSH_HOME%\screenshot-bridge\settings.json`。Host 路由：`/api/screenshot-bridge`，`op ∈ {state, wait, image, extract, figure, diag, save}`。
+
+## 自测（改代码之前先跑）
+
+```bash
+npm test           # node test-suite.mjs：一次跑完下面所有检查，全过才退出 0
+npm run matrix     # 只跑 32 个合成变体
+```
+
+`npm test` 一共 54 条断言：
+
+1. **32 个合成变体**：拿四张真实截图当底片（题库长图六图页、体块题页、纯文字题页、**Chrome PDF 真题页**），程序化生成 0.75 / 0.9 / 1.15 / 1.4 倍缩放（模拟分辨率与字号）、左侧加答题卡栏、右侧加二维码浮窗、整图反色（深色主题）。图形页的 `figs` 必须和底片一致（六图页 2、体块题 1、PDF 页 2），纯文字页必须 0；字数不允许整行/整题消失。
+2. **8 张真实网页截图**：力扣 ×3、洛谷 ×2、Codeforces、无忧考网文档预览，各自有最低字数门槛（如力扣两数之和 ≥250 字、洛谷 ≥380 字、Codeforces ≥800 字）。
+3. **4 张真机截图**：PDF 页、体块题、六图页、纯文字页的字数与图数。
+4. **校验告警**：把一页故意裁掉下半，必须主动报「第 82 题只认到题号，题干和选项都没认出来」。
+5. **双栏切分**：左栏必须整段先输出，右栏单独标注，不能串行。
+6. **表格重排**：程序化画一张 3 列 × 4 行带框线的表格，提取结果里必须出现`【表格重排】3 列`且每行按`a | b | c`排好；纯文字页不能误报表格。
+
+底片存在 `testdata/`（4 张，约 1.3 MB），不依赖任何外部路径，clone 下来就能跑。
+
+## 体积与安装
+
+- `npm install` 会跑 `scripts/postinstall.mjs`：
+  - `scripts/fetch-models.mjs --optional`：`models/` 里三件套缺了或 sha256 不对，就从 ModelScope 的 `v3.10.0` 重下（det 9.5 MB / rec 20 MB / 字典 74 KB），失败只警告；
+  - `scripts/prune-onnxruntime.mjs`：删掉 `onnxruntime-node` 里 macOS / Linux / Windows-arm64 的二进制和 DirectML/dxcompiler，**287 MB → 27.7 MB**，CPU 推理照常。
+- 可选高精度模型：`npm run models:medium` 会下 det 62 MB + rec 76 MB 到 `models/medium/`，然后设 `DSH_EXTRACT_MODEL=medium` 启用。实测它在 PDF 页会把两排图并成一张、且慢 2–3 倍（5–7 秒/张），**所以默认不用**，只有你在意小字时才开。
 
 ## 限制
 
@@ -124,6 +177,8 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 - 横向滚轮（`WheelLeft` / `WheelRight`）取决于鼠标驱动是否发送 `WM_MOUSEHWHEEL`，普通鼠标通常只有上下滚轮。
 - 同一时间只应有一个 DSH 窗口在接收；多开窗口会各自拉取同一批截图。
 - 会话 ID 只校验格式（`session-<uuid>` 或裸 uuid）；不存在的 id 会在发送时失败并显示原因。
+- 题面提取的引擎是本插件的 npm 依赖（`rapidocr-node` + `onnxruntime-node` + `sharp`）+ 自带的 `models/`，装完即用；起不来时不会报错，只是退回发图。固有短板：填空下划线 `____` 会丢；OCR 认错题号时图可能挂错题；套在深色主题里的浅色文字可能被墨迹阈值漏掉；题目在表格里、或图与文字完全重叠时可能切错；一行被压得很长的续行会单独成行而不并回上一句。这些都写进 `bridge.log` 的 `extract` 行，`ok:false` 时一定会退回发图。
+- **表格**：页面上有框线（横线 ≥3 条、竖线 ≥2 条）时，会把 OCR 的行按单元格重新排成 `a | b | c`，附在正文后面，标题为`【表格重排】N 列`。没有框线、只靠空格的表格仍然只能靠"整页文字 + 原图必发"兜着——这条要用版面检测模型才能解，而 PaddleOCR 的 PP-DocLayout 官方只发 paddle 权重，唯一现成的 ONNX 单个就 204 MB，和「纯 npm、别人装走即用」冲突，所以先用框线规则解掉最常见的一类（真题里的统计表都带框线）。
 
 ## 发布到 GitHub
 

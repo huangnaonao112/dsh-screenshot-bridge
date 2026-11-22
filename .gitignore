@@ -8,6 +8,10 @@ shots/
 bridge.log
 dist/
 *.tmp
+*.part
+
+# optional high-accuracy models (132 MB, `npm run models:medium` 才会下)
+models/medium/
 
 # editor / OS noise
 .DS_Store
