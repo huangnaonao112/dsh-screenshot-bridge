@@ -16,8 +16,14 @@ const settingsFile = path.join(process.env.DSH_HOME ?? path.join(os.homedir(), "
 
 const registered = [];
 const disposers = [];
+const fakeEvents = [
+  { type: "assistant/message", seq: 10, data: { message: { id: "m1", content: [{ type: "text", text: "第一版回答" }] } } },
+  { type: "assistant/message", seq: 20, data: { message: { id: "m2", content: [{ type: "text", text: "第二版回答：80 A 81 D" }] } } },
+];
 const fakeSessions = {
-  get() { return null; },
+  get() {
+    return { seq: 21, ownEvents: () => fakeEvents };
+  },
 };
 
 const ctx = {
@@ -84,6 +90,7 @@ const result = {
   resendIds: Array.isArray(resendBody.ids) ? resendBody.ids.length : -1,
   tokenLength: token.length,
   beforeItems: before.items.length,
+  latestAnswer: before.latestAnswer ? before.latestAnswer.text : null,
   session: before.session,
   shoot: shootBody,
   afterItems: after.items.length,
@@ -110,6 +117,7 @@ const captureGrew = allowForeignPipe ? true : result.afterItems > result.beforeI
 const pass = result.unauthorizedStatus === 401 && result.pageStatus === 200 && result.pageHasTitle &&
   result.qrStatus === 200 && String(result.qrType).includes("image/svg") && result.qrLooksLikeSvg &&
   result.resendStatus === 200 && result.resendIds === 0 &&
-  result.tokenLength > 10 && result.shoot.ok === true && captureGrew;
+  result.tokenLength > 10 && result.shoot.ok === true && captureGrew &&
+  result.latestAnswer === "第二版回答：80 A 81 D";
 process.exit(pass ? 0 : 1);
 

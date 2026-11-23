@@ -53,6 +53,8 @@
     var d = new Date(ms);
     return d.toLocaleTimeString("zh-CN", { hour12: false });
   }
+  var latestAnswer = null;
+
   function card(item, newest) {
     var html = '<div class="card">';
     html += '<div class="meta"><span>' + fmt(item.at) + '</span>';
@@ -67,6 +69,11 @@
     if (item.answer) {
       html += '<div class="label">回答' + (item.answerAt ? ' · ' + fmt(item.answerAt) : '') + '</div>';
       html += '<pre class="answer">' + esc(item.answer) + '</pre>';
+    } else if (newest && latestAnswer && latestAnswer.text) {
+      // 回复已经来了、但没绑定到这张图（比如连拍两张）：先把它显示出来，别让手机干等。
+      html += '<div class="label">会话最新回答' + (latestAnswer.at ? ' · ' + fmt(latestAnswer.at) : '') + '</div>';
+      html += '<pre class="answer">' + esc(latestAnswer.text) + '</pre>';
+      html += '<div class="meta"><span>这条回答没有绑定到本图，可能对应上一张截图</span></div>';
     } else if (newest) {
       html += '<div class="label">回答</div><div class="empty" style="padding:8px 0">等待模型回复…</div>';
     }
@@ -121,6 +128,7 @@
         return;
       }
       var items = data.items.slice().reverse();
+      latestAnswer = data.latestAnswer || null;
       var html = card(items[0], true);
       if (items.length > 1) {
         html += '<div class="card"><div class="label">历史</div>';

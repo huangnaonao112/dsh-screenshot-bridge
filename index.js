@@ -1430,7 +1430,14 @@ function lanSnapshot(state) {
     if (capture !== undefined) void runExtract(state, capture).catch(() => {});
   }
   const session = sessionOf(state);
-  return { seq: state.seq, session: session === null ? null : state.settings.sessionId, items };
+  const latest = session === null ? null : lastAssistant(session);
+  return {
+    seq: state.seq,
+    session: session === null ? null : state.settings.sessionId,
+    items,
+    // 兜底：即使某条回复没绑定到具体截图，手机也能看到"会话最新回答"。
+    latestAnswer: latest === null ? null : { text: latest.text.slice(0, 8000), at: Date.now() },
+  };
 }
 
 function sessionOf(state) {
@@ -1439,23 +1446,28 @@ function sessionOf(state) {
   return sessions.get(state.settings.sessionId) ?? null;
 }
 
-function lastAssistant(session) {
+function assistantEvents(session) {
   try {
-    const messages = session.deriveMessages();
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-      if (message === null || message === undefined || message.role !== "assistant") continue;
-      const text = (message.content ?? [])
-        .filter((block) => block !== null && block !== undefined && block.type === "text")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
-      if (text !== "") return { id: String(message.id), text };
-    }
+    return session.ownEvents()
+      .filter((event) => event.type === "assistant/message")
+      .map((event) => {
+        const blocks = event.data?.message?.content ?? [];
+        const text = blocks
+          .filter((block) => block !== null && block !== undefined && block.type === "text")
+          .map((block) => block.text)
+          .join("\n")
+          .trim();
+        return { seq: Number(event.seq) || 0, id: String(event.data?.message?.id ?? ""), text };
+      })
+      .filter((row) => row.text !== "");
   } catch {
-    // session may be mid-restore
+    return [];
   }
-  return null;
+}
+
+function lastAssistant(session) {
+  const events = assistantEvents(session);
+  return events.length === 0 ? null : events[events.length - 1];
 }
 
 /** Watch the target conversation for the reply that follows this capture. */
@@ -1463,18 +1475,21 @@ function watchAnswer(state, capture) {
   if (state.settings.sessionId === "") return;
   const session = sessionOf(state);
   if (session === null) return;
-  const baseline = lastAssistant(session);
+  const events = assistantEvents(session);
+  const baselineSeq = events.length > 0 ? events[events.length - 1].seq : Number(session.seq ?? 0);
   if (state.pendingAnswers === undefined) state.pendingAnswers = new Map();
-  state.pendingAnswers.set(capture.id, {
-    baselineId: baseline === null ? "" : baseline.id,
-    startedAt: Date.now(),
-  });
+  if (state.answerSeqs === undefined) state.answerSeqs = new Set();
+  state.pendingAnswers.set(capture.id, { baselineSeq, startedAt: Date.now() });
   if (state.answerPoller === undefined || state.answerPoller === null) {
     state.answerPoller = setInterval(() => pollAnswers(state), 900);
   }
 }
 
-/** One tick for every capture waiting on a reply; keeps timer count at one. */
+/**
+ * One tick for every capture waiting on a reply.
+ * 按 seq 归属：一条回复只给"基线 seq 比它小、且最接近它"的那张图，
+ * 不再用"最后一条消息 id"去猜；这样连拍两张也不会把 A 的答案挂到 B 上。
+ */
 function pollAnswers(state) {
   const pending = state.pendingAnswers;
   if (pending === undefined || pending.size === 0) {
@@ -1487,21 +1502,23 @@ function pollAnswers(state) {
     state.answerPoller = null;
     return;
   }
-  const live = sessionOf(state);
-  const latest = live === null ? null : lastAssistant(live);
-  for (const [captureId, job] of pending) {
-    if (Date.now() - job.startedAt > 180_000) {
+  const session = sessionOf(state);
+  if (session === null) return;  // 会话暂时不可见就继续等，不放弃
+  const events = assistantEvents(session);
+  const jobs = [...pending.entries()].sort((left, right) => left[1].baselineSeq - right[1].baselineSeq);
+  for (const [captureId, job] of jobs) {
+    if (Date.now() - job.startedAt > 30 * 60_000) {
       pending.delete(captureId);
+      void log(state, "answer-timeout", { id: captureId, baselineSeq: job.baselineSeq }).catch(() => {});
       continue;
     }
-    if (latest === null || latest.id === job.baselineId) continue;
-    const owner = state.answerClaims.get(latest.id);
-    if (owner !== undefined && owner !== captureId) continue;
-    state.answerClaims.set(latest.id, captureId);
+    const reply = events.find((row) => row.seq > job.baselineSeq && !state.answerSeqs.has(row.seq));
+    if (reply === undefined) continue;
+    state.answerSeqs.add(reply.seq);
     const shot = state.captures.find((entry) => entry.id === captureId);
     const latency = shot === undefined ? null : Date.now() - shot.at;
-    state.answers.set(captureId, { text: latest.text, at: Date.now(), latency });
-    void log(state, "answer", { id: captureId, ms: latency }).catch(() => {});
+    state.answers.set(captureId, { text: reply.text, at: Date.now(), latency });
+    void log(state, "answer", { id: captureId, seq: reply.seq, ms: latency }).catch(() => {});
     pending.delete(captureId);
   }
 }

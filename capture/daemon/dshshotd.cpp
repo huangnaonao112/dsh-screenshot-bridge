@@ -163,6 +163,7 @@ struct Options {
     std::string format = "png";    // png | jpg
     int quality = 95;
     unsigned long long hwnd = 0;
+    bool allowSelf = false;
     bool allScreens = false;
     bool clear = true;
     int prebufferMs = 600;
@@ -325,6 +326,29 @@ static ClearReport ClearProcessOf(HWND anchor) {
         },
         reinterpret_cast<LPARAM>(&ctx));
     return report;
+}
+
+// ---------------------------------------------------------------- foreground guard
+
+/// File name of the process that owns the foreground window ("" when unknown).
+static std::string ForegroundExe() {
+    HWND hwnd = GetForegroundWindow();
+    if (hwnd == nullptr) return std::string();
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (pid == 0 || pid == 4) return std::string();
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process == nullptr) return std::string();
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+    std::string name;
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+        std::wstring full(path, size);
+        size_t slash = full.find_last_of(L"\\/");
+        name = Utf8(slash == std::wstring::npos ? full : full.substr(slash + 1));
+    }
+    CloseHandle(process);
+    return name;
 }
 
 // ---------------------------------------------------------------- frame ring
@@ -971,6 +995,15 @@ public:
 private:
     void Capture() {
         const int64_t start = NowMs();
+        // 在 DSH 自己的窗口上按快捷键，截到的只是聊天界面，对答题没有意义；
+        // 直接报错让 Host/设置卡片显示原因，而不是发一张"这不是题目"的废图。
+        if (!options_.allowSelf) {
+            const std::string exe = ForegroundExe();
+            if (exe.find("DeepSeek Harness") != std::string::npos || exe == "dsh.exe") {
+                EmitError("foreground is DeepSeek Harness itself; switch to the exam window first");
+                return;
+            }
+        }
         const int64_t triggeredAt = start;
         HWND anchor = options_.hwnd != 0
             ? reinterpret_cast<HWND>(static_cast<uintptr_t>(options_.hwnd))
@@ -1179,6 +1212,8 @@ int wmain(int argc, wchar_t** argv) {
             std::string value;
             next(value);
             options.quality = std::atoi(value.c_str());
+        } else if (arg == "--allow-self") {
+            options.allowSelf = true;
         } else if (arg == "--all-screens") {
             options.allScreens = true;
         } else if (arg == "--clear") {
