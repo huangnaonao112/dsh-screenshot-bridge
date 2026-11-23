@@ -1,4 +1,8 @@
-# dsh-screenshot-bridge — screen capture hotkey helper.
+# dsh-screenshot-bridge — screen capture hotkey helper (FALLBACK ONLY).
+#
+# The Host prefers the resident native daemon (bin/dshshotd.exe). This script is
+# kept for source checkouts without a build and for parity on machines where the
+# daemon cannot start; expect ~0.5-1 s per capture here versus ~50 ms there.
 #
 # Registers one system-wide keyboard hotkey (RegisterHotKey) or one mouse trigger
 # (a low-level mouse hook for side buttons / the wheel), captures the screen into
@@ -27,13 +31,18 @@ param(
   [string]$Hotkey = 'Alt+Z',
   [string]$OutDir = '',
   [switch]$AllScreens,
-  [switch]$DryRun
+  [switch]$DryRun,
+  [string]$Backend = 'auto',
+  [string]$CaptureExe = '',
+  [string]$ClearExe = '',
+  [string]$KernelCtl = ''
 )
 
 $ErrorActionPreference = 'Stop'
 
 $csharp = @'
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -42,6 +51,14 @@ using System.Windows.Forms;
 
 public class DshScreenshotHotkey
 {
+    /** Optional native capture helper (shotcap.exe). Empty disables it. */
+    public static string CaptureExe = "";
+    /** Optional affinity cleaner (wdaclear.exe). Empty disables it. */
+    public static string ClearExe = "";
+    /** Optional kernel driver front end (dshcapctl.exe). Empty disables it. */
+    public static string KernelCtl = "";
+    /** auto | gdi | dxgi */
+    public static string Backend = "auto";
     private const int HotkeyId = 0x445348;
     private const int WmHotkey = 0x0312;
 
@@ -115,6 +132,12 @@ public class DshScreenshotHotkey
 
     [DllImport("user32.dll")]
     private static extern bool SetProcessDPIAware();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
 
     public DshScreenshotHotkey(string combo, string outDir, bool allScreens)
     {
@@ -329,6 +352,64 @@ public class DshScreenshotHotkey
     {
         if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
 
+        // Preferred path: shotcap.exe (DXGI desktop duplication, with GDI inside
+        // as its own fallback). It reports how much of the frame is actually
+        // lit, so a compositor placeholder is noticed instead of shipped.
+        if (CaptureExe != null && CaptureExe.Length != 0 && File.Exists(CaptureExe))
+        {
+            string native = CaptureNative(outDir, allScreens);
+            if (native != null) return native;
+        }
+        return CaptureGdi(outDir, allScreens);
+    }
+
+    /** Run shotcap.exe; null means "fall back to GDI". */
+    private static string CaptureNative(string outDir, bool allScreens)
+    {
+        string path = Path.Combine(
+            outDir,
+            "shot-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".png");
+
+        // Only pay for the affinity sweep when the foreground window is protected.
+        if (ClearExe != null && ClearExe.Length != 0 && File.Exists(ClearExe) && ForegroundProtected())
+        {
+            RunTool(ClearExe, "--clear --target foreground", 4000);
+            // Guarded / protected processes refuse the in-process payload; the
+            // kernel driver opens them from SYSTEM and creates the thread there.
+            if (ForegroundProtected() && KernelCtl != null && KernelCtl.Length != 0
+                && File.Exists(KernelCtl))
+            {
+                RunTool(KernelCtl, "--clear --guard 5", 4000);
+            }
+        }
+
+        string backend = string.IsNullOrEmpty(Backend) ? "auto" : Backend;
+        string mode = allScreens ? "desktop" : "screen";
+        string args = "--out \"" + path + "\" --mode " + mode + " --backend " + backend + " --json";
+        string output = RunTool(CaptureExe, args, 8000);
+        if (output == null) return null;
+        foreach (string raw in output.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.StartsWith("{") && line.Contains("\"kind\":\"capture\""))
+            {
+                if (line.Contains("\"blank\":true"))
+                {
+                    // Compositor handed back a placeholder: keep the file as
+                    // evidence but let GDI have a turn, then report the better one.
+                    string gdi = CaptureGdi(outDir, allScreens);
+                    return gdi ?? line;
+                }
+                return line;
+            }
+        }
+        return null;
+    }
+
+    private static string CaptureGdi(string outDir, bool allScreens)
+    {
+        if (!Directory.Exists(outDir)) Directory.CreateDirectory(outDir);
+
         Rectangle bounds = allScreens
             ? SystemInformation.VirtualScreen
             : Screen.FromPoint(Cursor.Position).Bounds;
@@ -347,9 +428,54 @@ public class DshScreenshotHotkey
             bitmap.Save(path, ImageFormat.Png);
         }
 
-        return "{\"kind\":\"capture\",\"path\":\"" + Escape(path)
+        return "{\"kind\":\"capture\",\"backend\":\"gdi\",\"path\":\"" + Escape(path)
             + "\",\"width\":" + bounds.Width
             + ",\"height\":" + bounds.Height + "}";
+    }
+
+    /** True when the foreground window asked the compositor to hide it from capture. */
+    private static bool ForegroundProtected()
+    {
+        IntPtr hwnd = GetForegroundWindow();
+        if (hwnd == IntPtr.Zero) return false;
+        uint affinity;
+        if (!GetWindowDisplayAffinity(hwnd, out affinity)) return false;
+        return affinity != 0;
+    }
+
+    /** Run one helper binary, capture stdout, and give up after `millis`. */
+    private static string RunTool(string exe, string arguments, int millis)
+    {
+        try
+        {
+            ProcessStartInfo info = new ProcessStartInfo(exe, arguments);
+            info.UseShellExecute = false;
+            info.CreateNoWindow = true;
+            info.RedirectStandardOutput = true;
+            info.RedirectStandardError = true;
+            using (Process process = Process.Start(info))
+            {
+                if (process == null) return null;
+                System.Text.StringBuilder text = new System.Text.StringBuilder();
+                process.OutputDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null) text.AppendLine(e.Data);
+                };
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                if (!process.WaitForExit(millis))
+                {
+                    try { process.Kill(); } catch { }
+                    return null;
+                }
+                process.WaitForExit();
+                return text.ToString();
+            }
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private bool OnHotkey()
@@ -469,6 +595,11 @@ try {
   Add-Type -TypeDefinition $csharp -ErrorAction Stop
 }
 
+[DshScreenshotHotkey]::CaptureExe = $CaptureExe
+[DshScreenshotHotkey]::ClearExe = $ClearExe
+[DshScreenshotHotkey]::KernelCtl = $KernelCtl
+[DshScreenshotHotkey]::Backend = $Backend
+
 if ($DryRun) {
   $line = [DshScreenshotHotkey]::Capture($OutDir, [bool]$AllScreens)
   Write-Output $line
@@ -477,3 +608,4 @@ if ($DryRun) {
 
 $runner = New-Object DshScreenshotHotkey($Hotkey, $OutDir, [bool]$AllScreens)
 $runner.Run()
+

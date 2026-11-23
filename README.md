@@ -6,7 +6,7 @@
 
 ## 安装
 
-包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.2.3`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
+包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.15.0`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
 
 **方式一：DSH 内置安装器，输入包名（推荐）**
 
@@ -100,10 +100,45 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 - 快捷键改动点「保存」或失焦即写 `settings.json` 并**立即重启助手**，不需要重启 DSH；从设置页返回时，仍为保存的草稿也会自动提交。
 - 键盘组合由独立的 PowerShell 助手用 Win32 `RegisterHotKey` 注册，鼠标侧键/滚轮由低级鼠标钩子 `WH_MOUSE_LL` 注册，**窗口不在前台也能用**。一次按下（含长按侧键）只截一张，松开后才接受下一次；滚轮一格触发一次，600ms 冷却防止惯性连发。
 - 默认截「鼠标所在的那块屏幕」；打开「截取全部屏幕」时截整个虚拟桌面（多屏拼成一张）。
-- 图片存于 `%DSH_HOME%\screenshot-bridge\shots`（默认 `~/.dsh/...`），保留最近 40 张。
+- 图片存于插件目录下的 `.shots/`（沙箱只允许写工作区；可用 `DSH_SHOT_DIR` 覆盖），保留最近 40 张；内存里的截图条目与磁盘文件同步淘汰，不会再出现指向已删文件的 404。
 - 目标对话忙碌时消息排队，不打断正在跑的回合；失败原因写入 `bridge.log`。
 - DSH 关闭期间按快捷键，截图仍会生成；重开应用后不会把积压的图补发进对话。
 - 关闭开关后助手退出，不再投递；对话框下面不会出现任何插件控件，全部配置只在设置卡片里。
+
+## 局域网看答案（1.9.0）
+
+同一个局域网里的手机/平板，用浏览器打开卡片上给的地址，就能看到：最新截图、本地识别出的文字、模型的回答；页面上还有一个「拍一张」按钮，不用碰电脑。
+
+- 服务在 Host 进程里，监听 `0.0.0.0:<lanPort>`（默认 8787；端口被占会自动往后试 8788–8796）。
+- 地址自带访问口令：`http://<本机局域网IP>:8787/?k=<token>`，token 首次使用自动生成，写在 `settings.json` 的 `lanToken`。
+- **卡片里直接出二维码**：设置 → 截图桥 →「局域网看答案」一栏上方就是这张地址的 QR（Host 用内置 `qr.mjs` + 厂商版 qrcode-generator 生成 SVG），手机扫一下即可，不用手输。二维码随地址/端口/token 变化自动刷新。
+- 回答从 DSH 的目标会话里读：截图发出后盯住该会话，出现新的 assistant 消息就挂到这张截图上（最多等 180 秒）。会话没打开时页面显示「会话未打开」。
+- 页面每 1.2 秒刷新一次；历史保留最近 20 张。
+- **安全**：这是明文 HTTP + query token，同一局域网里拿到 URL 的人都能看。不要在不可信网络里开；关掉卡片上的「局域网看答案」服务即停。
+
+卡片「局域网看答案」一栏：二维码给手机扫，下面那行地址仍可直接选中复制（扫码失败时手输）。
+- 设置卡片：会话 ID 整行显示（11px 等宽）+ 「复制」按钮；截全屏/绕保护/采集通道/截哪一块/存图格式 收进「高级设置 ▾」，默认只留常用项，卡片高度约减一半。
+
+## 采集通道与截图保护（1.8.0）
+
+截图不再是「按一次拉一个 PowerShell 再拉一个截图 exe」。现在是**一个常驻进程**（`bin/dshshotd.exe`）：
+
+- **热键 + 采集 + 清保护同进程**：注册全局热键、DXGI 采集、清 `SetWindowDisplayAffinity` 都在一个进程里，
+  不再每次 spawn。按下到 PNG 落盘实测 **45–70 ms**（旧链路 489 ms）。
+- **预录**：常驻缓存最近 0.6 秒的帧（8 张 GPU 纹理，约 120 MB 显存），按快捷键取**按下前**那一帧——
+  客户端一失焦就糊屏的场面靠这个救回来。设置卡片「预录刚才那一刻」默认开。
+- **清保护不留 DLL**：不再往目标进程塞 `wdapay.dll`，改成在目标进程里跑一段一次性 stub 线程调用
+  `SetWindowDisplayAffinity(hwnd, WDA_NONE)`；目标进程的模块列表里看不到任何新增文件。
+  受保护窗口先清后截（`cleared:1`），未受保护窗口则用预录帧。
+- **内核档（可选）**：用户态开不了句柄的目标，装 `capture/kdrv/dshshot.sys` 由内核在目标进程建线程；
+  没有签名证书时需 `bcdedit /set testsigning on` 并重启一次（已注册好，见 `capture/kdrv/install.ps1`）。
+- **窗口级抓取**：清掉保护后 `PrintWindow(PW_RENDERFULLCONTENT)` 能渲染窗口自己，所以受保护窗口只截那一块——不怕被遮挡、图从 2560×1440 缩到窗口尺寸（实测 520×340、8.8 KB）。卡片「截哪一块」可选自动/窗口/整屏。\n- **表格重排**：框线太淡或没有框线的数据表（资料分析那种）会按 OCR 坐标重排成 `a | b | c`，表头也带上；一页多张表分别重排、分别裁图；同时把表格区域裁图附给模型。\n- **JPEG 快速编码**：同一画面 PNG 编码 118 ms、JPEG(q95) 18 ms（6 倍）。卡片「存图格式」可切，默认 PNG 无损。\n- **兜底**：`bin/shotcap.exe`（CLI）和 `hotkey.ps1`（PowerShell）都还在，删掉 daemon 也能跑，只是回到 0.5–1 s。
+
+实测（本机 Win11 26200）：`capture/test-daemon.ps1` → 5 次全部走 ring，avg 46 ms；
+`capture/test-wda.ps1` → 清前 108.9 / 清后 135.8，窗口内容真的出现了。
+
+边界：DRM / OPM 保护的内容（Netflix、PlayReady、HDCP 链路）在任何软件层都是黑屏，只有硬件采集卡能解；
+保护进程能否被打开取决于对方是否 PPL；32 位目标进程不支持注入。
 
 ## 题面提取（可选，设置卡片里二选一）
 
@@ -141,6 +176,16 @@ New-Item -ItemType Junction -Path node_modules\@deepseek-ai\schemastery `
 | `allScreens` | `false` | 截整块虚拟桌面而非鼠标所在屏幕 |
 | `prompt` | `我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程` | 随截图发送的文字，`{time}` 替换为本地时间；清空则只发图 |
 | `mode` | `extract` | `image` = 直接发截图；`extract` = 本地提取题面文本 + 题图后发送 |
+| `captureBackend` | `auto` | `auto` = 桌面复制优先、黑屏退 GDI；`gdi` = 传统 BitBlt；`dxgi` = 强制桌面复制 |
+| `clearProtection` | `true` | 截图前清掉前台窗口的 `SetWindowDisplayAffinity` 保护（stub 线程，必要时再走内核 `dshshot`） |
+| `prebuffer` | `true` | 常驻缓存最近 0.6 秒，按下时取触发前的帧 |
+| `selfCheck` | `true` | 答完让模型回读截图核对，对不上的题标「待核」 |
+| `ocrModel` | `small` | `small` / `medium`（`medium` 更准更慢，需先 `npm run models:medium`） |
+| `captureTarget` | `auto` | `auto` 受保护时只截前台窗口；`window` 只截窗口；`screen` 整屏 |
+| `imageFormat` | `png` | `png` 无损慢；`jpg` 快 6 倍（q95） |
+| `lanEnabled` | `true` | 是否在局域网提供看答案页面 |
+| `lanPort` | `8787` | 页面端口；被占会自动往后试 |
+| `lanToken` | 自动生成 | 页面访问口令 |
 | `extract` | `true` | 旧布尔别名，等价于 `mode` 的两种取值，仅为兼容旧设置文件 |
 
 诊断日志：`%DSH_HOME%\screenshot-bridge\bridge.log`。卡片设置：`%DSH_HOME%\screenshot-bridge\settings.json`。Host 路由：`/api/screenshot-bridge`，`op ∈ {state, wait, image, extract, figure, diag, save}`。
@@ -173,6 +218,7 @@ npm run matrix     # 只跑 32 个合成变体
 ## 限制
 
 - 仅 Windows：依赖 Win32 全局热键、低级鼠标钩子与屏幕捕获。
+- 截图保护清除只对 `SetWindowDisplayAffinity` 生效；DRM / OPM（PlayReady、HDCP 链路）在驱动层就换掉了像素，软件层无解；PPL/保护进程可能拒绝打开（原因写进 `bridge.log`）；32 位目标进程不支持注入。
 - 键盘快捷键若被别的程序占用，卡片状态会显示错误，换一个组合即可；鼠标侧键/滚轮用的是全局低级钩子，若被安全软件拦下会显示未注册。
 - 横向滚轮（`WheelLeft` / `WheelRight`）取决于鼠标驱动是否发送 `WM_MOUSEHWHEEL`，普通鼠标通常只有上下滚轮。
 - 同一时间只应有一个 DSH 窗口在接收；多开窗口会各自拉取同一批截图。
@@ -194,7 +240,7 @@ git push -u origin main
 
 也可以在 GitHub 网页新建空仓库后执行最后两行；如果装了 GitHub CLI，可用 `gh repo create dsh-screenshot-bridge --public --source=. --push`。
 
-当前 npm 版本是 `1.0.1`。后续发布：
+当前 npm 版本是 `1.15.0`。后续发布：
 
 ```powershell
 npm version patch
@@ -202,3 +248,11 @@ npm publish --access public
 ```
 
 npm 已不再提供 Classic / Automation token；直接发布需要账号开启 2FA，或使用带 **Bypass 2FA** 的 Granular Access Token。`package.json` 的 `author` / `repository` / `homepage` 已指向 `huangnaonao112/dsh-screenshot-bridge`；仓库改名时同步更新。GitHub 仓库用于查看源码和提交 issue，安装优先用上面的 npm 包名。
+
+
+
+
+
+
+
+

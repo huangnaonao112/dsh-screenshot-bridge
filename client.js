@@ -47,8 +47,12 @@ window.__ModuleLoader__.load({
         hotkeyLabel: "快捷键",
         hotkeyHint: "点「录制」后按组合键、鼠标侧键或滚轮，也可直接输入。键盘组合至少一个修饰键，例如 Alt+Z；鼠标可写 Alt+XButton1、Ctrl+WheelUp。",
         sessionLabel: "会话 ID",
-        sessionHint: "截图固定发往该会话；请填写会话 ID，留空不会投递。",
+        sessionHint: "截图固定发往该会话；改完点「保存」、按回车或点一下别处都会保存。",
         sessionPlaceholder: "session-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        copy: "复制",
+        copied: "已复制",
+        advancedShow: "高级设置 ▾",
+        advancedHide: "收起高级 ▴",
         save: "保存",
         saved: "已保存",
         saving: "保存中…",
@@ -63,6 +67,39 @@ window.__ModuleLoader__.load({
         errorState: "错误：{message}",
         allScreensLabel: "截取全部屏幕",
         allScreensHint: "默认只截鼠标所在的那块屏幕。",
+        protectLabel: "绕过截图保护",
+        protectHint: "截图前先清掉前台窗口的 SetWindowDisplayAffinity 保护（会在该进程里加载一个小助手）。对方有反作弊/保护进程时可能清不掉，原因写进 bridge.log。",
+        backendLabel: "采集通道",
+        backendHint: "自动：先走桌面复制，抓到黑屏再退回 GDI；GDI：传统 BitBlt；桌面复制：DXGI Desktop Duplication。",
+        backendAuto: "自动",
+        backendGdi: "GDI",
+        backendDxgi: "桌面复制",
+        targetLabel: "截哪一块",
+        targetHint: "自动：前台窗口被防截屏保护时只截那个窗口（不怕遮挡、图更小），否则截整屏。",
+        targetAuto: "自动",
+        targetWindow: "只截窗口",
+        targetScreen: "整屏",
+        formatLabel: "存图格式",
+        formatHint: "PNG 无损但编码慢；JPEG（质量 95）编码快 5 倍以上，文字照样清楚。",
+        formatPng: "PNG",
+        formatJpg: "JPEG",
+        followLabel: "图什么时候补发",
+        followHint: "自动：只有出现图/表或文字残缺时才补发第二条（最快）；总是：每次补发；从不：只发文字。",
+        followAuto: "自动",
+        followAlways: "总是",
+        followNever: "从不",
+        prebufferLabel: "预录刚才那一刻",
+        prebufferHint: "常驻缓存最近的 0.6 秒画面，按快捷键时取按下前那一帧——有些客户端一失焦就把题目糊掉，靠这个拿回来。",
+        recentLabel: "最近会话",
+        recentHint: "点一下就能把截图投到那个对话，不用再手输 ID。列表只含当前打开的会话。",
+        recentRefresh: "刷新",
+        recentEmpty: "没有打开的会话",
+        lanLabel: "局域网看答案",
+        lanHint: "在手机/平板浏览器打开下面的地址：看最新截图、识别文字和模型回答，也能远程按一张。地址里带访问口令，别外传。",
+        lanOff: "已关闭",
+        lanOn: "已开启",
+        fastAnswerLabel: "快速作答",
+        fastAnswerHint: "随图附一句「不要开子代理、不要联网搜题」。实测一张图的回答被拖到 12 分钟，就是模型自己开了子代理+联网搜题。",
         modeLabel: "截图怎么给模型",
         modeHint: "两个方案随时切换：直接发截图，或发「原截图 + 本地识别出的文字」。文字只当辅助，出错以截图为准；认不出文字就只发截图。",
         modeImage: "直接发截图",
@@ -97,8 +134,12 @@ window.__ModuleLoader__.load({
         hotkeyLabel: "Hotkey",
         hotkeyHint: "Press Record and press a chord, mouse side button, or wheel; typing works too. Keyboard chords need one modifier, e.g. Alt+Z; mouse examples: Alt+XButton1, Ctrl+WheelUp.",
         sessionLabel: "Conversation id",
-        sessionHint: "Captures always go to this conversation; fill in the id, blank never sends.",
+        sessionHint: "Captures always go to this conversation; saving happens on the button, Enter, or leaving the field.",
         sessionPlaceholder: "session-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+        copy: "Copy",
+        copied: "Copied",
+        advancedShow: "Advanced ▾",
+        advancedHide: "Hide advanced ▴",
         save: "Save",
         saved: "Saved",
         saving: "Saving…",
@@ -113,6 +154,39 @@ window.__ModuleLoader__.load({
         errorState: "error: {message}",
         allScreensLabel: "Capture every display",
         allScreensHint: "Off captures only the display under the pointer.",
+        protectLabel: "Bypass capture protection",
+        protectHint: "Clear the foreground window's SetWindowDisplayAffinity before capturing (loads a small helper into that process). Guarded or protected processes may still refuse; the reason lands in bridge.log.",
+        backendLabel: "Capture channel",
+        backendHint: "Auto: composited desktop first, GDI when it comes back black; GDI: classic BitBlt; Desktop: DXGI Desktop Duplication.",
+        backendAuto: "Auto",
+        backendGdi: "GDI",
+        backendDxgi: "Desktop",
+        targetLabel: "What to capture",
+        targetHint: "Auto: when the foreground window is capture-protected, grab that window only (no occlusion, much smaller); otherwise grab the screen.",
+        targetAuto: "Auto",
+        targetWindow: "Window",
+        targetScreen: "Screen",
+        formatLabel: "Image format",
+        formatHint: "PNG is lossless but slow to encode; JPEG q95 is >5x faster and still crisp for text.",
+        formatPng: "PNG",
+        formatJpg: "JPEG",
+        followLabel: "Image follow-up",
+        followHint: "Auto: only when figures/tables or gaps show up (fastest); Always: every capture; Never: text only.",
+        followAuto: "Auto",
+        followAlways: "Always",
+        followNever: "Never",
+        prebufferLabel: "Keep the last moment",
+        prebufferHint: "Cache the last 0.6 s in memory and use the frame from before the key press — clients that blank on focus loss can be recovered from it.",
+        recentLabel: "Recent chats",
+        recentHint: "One click targets that conversation; no id typing. Live sessions only.",
+        recentRefresh: "Refresh",
+        recentEmpty: "no open conversations",
+        lanLabel: "LAN answer page",
+        lanHint: "Open the address below on a phone or tablet to see the newest capture, its text and the answer, and to trigger a capture. The URL carries the access token.",
+        lanOff: "off",
+        lanOn: "on",
+        fastAnswerLabel: "Answer directly",
+        fastAnswerHint: "Appends a no-subagent / no-web-search rule. Measured: one screenshot took 12 minutes because the model spawned a subagent and searched the web.",
         modeLabel: "What the model receives",
         modeHint: "Switch any time: the screenshot alone, or the screenshot plus text recognised locally. The text is a helper only — the picture wins; if nothing is recognised, the picture goes alone.",
         modeImage: "Send the screenshot",
@@ -140,11 +214,32 @@ window.__ModuleLoader__.load({
     var formStatus = "loading";
     /** Whether the Host document accepts writes for this row. */
     var formWritable = false;
+    /** Data URL of the LAN page QR code, refreshed when the URL changes. */
+    var qrDataUrl = "";
+
+    async function loadQr() {
+      try {
+        var response = await fetch(ROUTE + "?op=qr", { cache: "no-store" });
+        if (!response.ok) return;
+        var svg = await response.text();
+        var next = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+        if (next !== qrDataUrl) {
+          qrDataUrl = next;
+          notify();
+        }
+      } catch {
+        // no QR when the Host is old
+      }
+    }
+
     /** Last accepted settings; mirrors the Host's live config. */
-    var DEFAULT_PROMPT = "我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程";
-    var settings = { enabled: true, hotkey: "Alt+Z", sessionId: "", allScreens: false, prompt: DEFAULT_PROMPT, mode: "extract", extract: true };
+    var DEFAULT_PROMPT = "我下面附了一段从截图里识别出来的题目文字。请只回答其中**题干和选项都完整**的题：按题号顺序直接给答案，只给答案、不要解析；不要逐题核对，也不要先去验证题目是否完整。文字残缺、选项缺失或数字明显乱掉的题，直接标「文字残缺」跳过，不修补、不纠缠；需要的话我自己再看截图。不要开子代理，也不要联网搜题；拿不准的题标「待核」。如果没有附文字，就直接看图作答。";
+    var settings = { enabled: true, hotkey: "Alt+Z", sessionId: "", allScreens: false, prompt: DEFAULT_PROMPT, mode: "extract", extract: true, captureBackend: "auto", clearProtection: true, prebuffer: true, fastAnswer: true, splitText: true, imageFollowUp: "auto", ocrModel: "small", captureTarget: "auto", imageFormat: "png", lanEnabled: true, lanPort: 8787, lanToken: "" };
     /** Whether the Host route has supplied the authoritative settings file. */
     var hostSettingsLoaded = false;
+    /** Bumped on every accepted save; a fetchState that started before the
+        save must never apply its (older) snapshot over the saved values. */
+    var settingsGeneration = 0;
     /** Latest Host facts for the status lines. */
     var hostState = { running: false, error: null, latestSeq: 0 };
     /** One shared status line, so any mounted surface can show the newest outcome. */
@@ -307,6 +402,7 @@ window.__ModuleLoader__.load({
           }
           var data = await response.json().catch(function () { return null; });
           if (data !== null && typeof data === "object" && data.settings !== undefined) {
+            settingsGeneration += 1;
             settings = normalizeSettings(data.settings);
             hostSettingsLoaded = true;
             notify();
@@ -334,6 +430,18 @@ window.__ModuleLoader__.load({
           ? raw.mode
           : (raw.extract === false ? "image" : "extract"),
         extract: (raw.mode === "image" || raw.mode === "extract" ? raw.mode : (raw.extract === false ? "image" : "extract")) === "extract",
+        captureBackend: raw.captureBackend === "gdi" || raw.captureBackend === "dxgi" ? raw.captureBackend : "auto",
+        clearProtection: raw.clearProtection !== false,
+        prebuffer: raw.prebuffer !== false,
+        fastAnswer: raw.fastAnswer !== false,
+        splitText: raw.splitText !== false,
+        imageFollowUp: raw.imageFollowUp === "always" || raw.imageFollowUp === "never" ? raw.imageFollowUp : "auto",
+        ocrModel: raw.ocrModel === "medium" ? "medium" : "small",
+        captureTarget: raw.captureTarget === "window" || raw.captureTarget === "screen" ? raw.captureTarget : "auto",
+        imageFormat: raw.imageFormat === "jpg" ? "jpg" : "png",
+        lanEnabled: raw.lanEnabled !== false,
+        lanPort: Number.isFinite(raw.lanPort) ? Math.trunc(raw.lanPort) : 8787,
+        lanToken: typeof raw.lanToken === "string" ? raw.lanToken : "",
       };
     }
 
@@ -364,16 +472,24 @@ window.__ModuleLoader__.load({
     /** Read the Host's running state; used by both surfaces' status lines. */
     async function fetchState() {
       try {
+        var generation = settingsGeneration;
         var response = await fetch(ROUTE + "?op=state", { cache: "no-store" });
         if (!response.ok) return null;
         var data = await response.json();
         if (data === null || typeof data !== "object") return null;
-        if (data.settings !== undefined) settings = normalizeSettings(data.settings);
-        if (data.settings !== undefined) hostSettingsLoaded = true;
+        if (data.settings !== undefined && generation === settingsGeneration) {
+          var next = normalizeSettings(data.settings);
+          if (next.sessionId !== settings.sessionId) {
+            report("session-from-host " + next.sessionId);
+          }
+          settings = next;
+          hostSettingsLoaded = true;
+        }
         hostState = {
           running: data.running === true,
           error: typeof data.error === "string" ? data.error : null,
           latestSeq: typeof data.latestSeq === "number" ? data.latestSeq : 0,
+          lan: data.lan && typeof data.lan === "object" ? data.lan : null,
         };
         notify();
         if (hostState.error !== null && hostState.error !== "") report("host-error " + hostState.error);
@@ -383,11 +499,56 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** LAN 页点「补发这张图」时，Host 把截图 id 排进队列；这里取出来逐张补发。 */
+    async function pollResend(ctx) {
+      var response;
+      try {
+        response = await fetch(ROUTE + "?op=resend", { cache: "no-store" });
+      } catch {
+        return;
+      }
+      if (!response.ok) return;
+      var data = await response.json().catch(function () { return null; });
+      var ids = data !== null && Array.isArray(data.ids) ? data.ids : [];
+      if (ids.length === 0) return;
+      for (var i = 0; i < ids.length; i += 1) {
+        var capture = state.captures.find(function (entry) { return entry.id === ids[i]; });
+        if (capture === undefined) continue;
+        await sendResend(ctx, capture);
+      }
+    }
+
+    async function sendResend(ctx, capture) {
+      var target = settings.sessionId;
+      if (target === "") return;
+      var file = await fetchShot(capture);
+      if (file === null) return;
+      var drafts = ctx.conversation.createDrafts(target, [file], true);
+      var ids = drafts.map(function (draft) { return draft.id; });
+      try {
+        await waitForUploads(ctx, ids);
+        await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
+          return await ctx.conversation.sendSession(reference.binding.session, "这是刚才那张截图的补发，请直接按图作答。", ids, "queue");
+        });
+        publish(tr("sent", { time: clock() }), "info");
+      } catch (error) {
+        report("resend failed: " + messageOf(error));
+      }
+    }
+
+    /** Wrap fetched bytes as a File; the daemon may hand back JPEG when it is set. */
+    function imageFile(blob, stem) {
+      var type = blob.type && blob.type.indexOf("jpeg") >= 0 ? "image/jpeg" : (blob.type || "image/png");
+      var ext = type === "image/jpeg" ? "jpg" : "png";
+      return new window.File([blob], stem + "." + ext, { type: type });
+    }
+
     /** Prompt text sent with the image; `{time}` becomes the local clock. */
     function promptText() {
       var template = typeof settings.prompt === "string" ? settings.prompt : "";
       if (template === "") return "";
-      return template.replace(/\{time\}/gu, clock());
+      var text = template.replace(/\{time\}/gu, clock());
+      return text;
     }
 
     /** Wait until every staged draft finished uploading, or explain why it cannot. */
@@ -440,10 +601,15 @@ window.__ModuleLoader__.load({
           return null;
         }
         var payload = await response.json();
-        if (payload === null || payload.ok !== true || typeof payload.text !== "string" || payload.text.trim() === "") {
+        var hasText = payload !== null && typeof payload.text === "string" && payload.text.trim() !== "";
+        var hasFigures = payload !== null && Array.isArray(payload.figures) && payload.figures.length > 0;
+        if (payload === null || payload.ok !== true || (!hasText && !hasFigures)) {
           report("extract skipped: " + String(payload !== null && payload.reason ? payload.reason : "empty"));
           return null;
         }
+        // 图推页常常"没有可用文字、但有裁好的图"：文字为空也要把图带下去，
+        // 否则补图那条消息拿不到 figures。
+        if (!hasText) return { ok: true, text: "", figures: payload.figures, warnings: payload.warnings ?? [] };
         return payload;
       } catch (error) {
         report("extract failed: " + messageOf(error));
@@ -461,7 +627,7 @@ window.__ModuleLoader__.load({
         }
         var blob = await response.blob();
         if (blob.size === 0) return null;
-        return new window.File([blob], "screenshot-" + stamp() + ".png", { type: "image/png" });
+        return imageFile(blob, "screenshot-" + stamp());
       } catch (error) {
         report("image failed: " + messageOf(error));
         return null;
@@ -483,7 +649,7 @@ window.__ModuleLoader__.load({
           }
           var blob = await response.blob();
           if (blob.size === 0) continue;
-          files.push(new window.File([blob], "图" + String(n) + ".png", { type: "image/png" }));
+          files.push(imageFile(blob, "图" + String(n)));
         } catch (error) {
           report("figure " + String(n) + " failed: " + messageOf(error));
         }
@@ -499,19 +665,89 @@ window.__ModuleLoader__.load({
         return;
       }
 
-      // "extract" 模式：**原截图一定要发**，本地认出来的文字只当辅助一起附上。
-      // 认不出来（空文本）就退化成只发图，不会让截图发不出去。
+      // extract 模式：文字优先。
+      //  - 识别出文字时：先把文字单独发一条（没有图片，prefill 很小，答案很快回来），
+      //    然后原图再发一条，只补“残缺/待核”的题；
+      //  - 没识别出文字：原图 + 提示词，一次发完。
       if (settings.mode === "extract") {
         var extracted = await extractQuestions(capture);
+        var text = extracted !== null && typeof extracted.text === "string" ? extracted.text.trim() : "";
+
+        if (settings.splitText !== false && text !== "") {
+          var textOnly = promptText()
+            + "\n\n下面是从截图里认出来的题目文字（可能有错字、漏行）。"
+            + "只答完整可读的题；残缺的标「残缺」跳过，不要核对、不要修补：\n" + text.slice(0, 6000);
+          try {
+            var firstOutcome = await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
+              return await ctx.conversation.sendSession(reference.binding.session, textOnly, [], "queue");
+            });
+            if (firstOutcome !== undefined && firstOutcome !== null && firstOutcome.kind === "error") {
+              throw new Error(firstOutcome.text || "conversation rejected the text message");
+            }
+            publish(tr("sent", { time: clock() }), "info");
+            report("send-text " + String(Date.now() - (capture.at ?? Date.now())) + "ms");
+
+            // 快字优先：文字这条已经把完整题答了的时候，**不再发第二条**。
+            // 只在"有图/表"或"文字残缺"时才补一次，而且只发裁图（不发整屏）。
+            var figures = extracted !== null && Array.isArray(extracted.figures) ? extracted.figures : [];
+            var warningText = extracted !== null && Array.isArray(extracted.warnings) ? extracted.warnings.join(" ") : "";
+            var looksIncomplete = /残缺|待核|漏|不全|缺/u.test(warningText) || text.length < 120;
+            var policy = settings.imageFollowUp === "always" ? "always"
+              : settings.imageFollowUp === "never" ? "never" : "auto";
+            var needFollow = policy === "always" || (policy === "auto" && (figures.length > 0 || looksIncomplete));
+            if (needFollow) {
+              var followFiles = [];
+              var cropped = await extractFigures(capture, figures);
+              // 只补"文字里明确残缺"的那几题；判断不出来的再退回全部。
+              var incomplete = extracted !== null && Array.isArray(extracted.incomplete) ? extracted.incomplete : [];
+              var wanted = cropped.filter(function (fig) {
+                return fig.q !== null && fig.q !== undefined && incomplete.indexOf(fig.q) >= 0;
+              });
+              var pool = wanted.length > 0 ? wanted : cropped;
+              // 最多 3 张：图越多 prefill 越慢。
+              for (var fi = 0; fi < pool.length && followFiles.length < 3; fi += 1) followFiles.push(pool[fi]);
+              if (followFiles.length === 0) {
+                var fallbackShot = await fetchShot(capture);
+                if (fallbackShot !== null) followFiles.push(fallbackShot);
+              }
+              if (followFiles.length === 0) return;
+              report("follow-up files " + String(followFiles.length));
+              var followDrafts = ctx.conversation.createDrafts(target, followFiles, true);
+              var followIds = followDrafts.map(function (draft) { return draft.id; });
+              await waitForUploads(ctx, followIds);
+              var wantedQs = wanted.map(function (fig) { return fig.q; }).filter(function (q, i, all) { return all.indexOf(q) === i; });
+              var followPrompt = (wantedQs.length > 0 ? "只补第 " + wantedQs.join("、") + " 题的图；" : "")
+                + "这是同一批题的原截图"
+                + (cropped.length > 0 ? "，另外附了按题裁出来的图（放大过）" : "")
+                + "。只补上面回答里标「残缺」「待核」或漏掉的题；已经答过的不要重复。"
+                + "图形推理题可以先用一两句话说明你看到的图形特征和分组依据，再给出选项字母；其余题只给答案。";
+              var secondOutcome = await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
+                return await ctx.conversation.sendSession(
+                  reference.binding.session,
+                  followPrompt,
+                  followIds,
+                  "queue",
+                );
+              });
+              if (secondOutcome !== undefined && secondOutcome !== null && secondOutcome.kind === "error") {
+                report("image follow-up rejected: " + String(secondOutcome.text ?? ""));
+              }
+              report("send-follow " + String(Date.now() - (capture.at ?? Date.now())) + "ms");
+            }
+            return;
+          } catch (error) {
+            report("text-first send failed, falling back to text+image: " + messageOf(error));
+          }
+        }
+
         var shotFile = await fetchShot(capture);
         if (shotFile !== null) {
           var composed = promptText();
-          var text = extracted !== null && typeof extracted.text === "string" ? extracted.text.trim() : "";
           if (text !== "") {
-            composed += "\n\n下面是从截图里认出来的文字（可能有错字、漏行、顺序错乱，仅供你参考和复制；"
-              + "内容以附上的原截图为准）：\n" + text;
+            composed += "\n\n下面是从截图里认出来的题目文字（可能有错字、漏行）。"
+              + "只答完整可读的题；残缺的标「残缺」跳过，不要核对、不要修补：\n" + text;
             var notes = Array.isArray(extracted.warnings) ? extracted.warnings : [];
-            if (notes.length > 0) {
+            if (notes.length > 0 && settings.fastAnswer !== true) {
               composed += "\n\n本地校验没对上的地方（以截图为准，必要时回头看一眼整页）：\n- "
                 + notes.slice(0, 6).join("\n- ");
             }
@@ -522,11 +758,11 @@ window.__ModuleLoader__.load({
             drafts = ctx.conversation.createDrafts(target, [shotFile], true);
             ids = drafts.map(function (draft) { return draft.id; });
             await waitForUploads(ctx, ids);
-            var textOutcome = await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
+            var outcome = await ctx.sessions.using(target, { source: "screenshotBridge" }, async function (reference) {
               return await ctx.conversation.sendSession(reference.binding.session, composed, ids, "queue");
             });
-            if (textOutcome !== undefined && textOutcome !== null && textOutcome.kind === "error") {
-              throw new Error(textOutcome.text || "conversation rejected the message");
+            if (outcome !== undefined && outcome !== null && outcome.kind === "error") {
+              throw new Error(outcome.text || "conversation rejected the message");
             }
             publish(tr("sent", { time: clock() }), "info");
             return;
@@ -548,7 +784,7 @@ window.__ModuleLoader__.load({
       var response = await fetch(ROUTE + "?op=image&id=" + encodeURIComponent(capture.id));
       if (!response.ok) throw new Error("image " + String(response.status));
       var blob = await response.blob();
-      var file = new window.File([blob], "screenshot-" + stamp() + ".png", { type: "image/png" });
+      var file = imageFile(blob, "screenshot-" + stamp());
 
       var drafts = ctx.conversation.createDrafts(target, [file], true);
       var ids = drafts.map(function (draft) { return draft.id; });
@@ -717,6 +953,10 @@ window.__ModuleLoader__.load({
       var t = typeof props.t === "function" ? props.t : tr;
       var locked = false;
 
+      React.useEffect(function () {
+        if (settings.lanEnabled) void loadQr();
+      }, [settings.lanEnabled, hostState.lan && hostState.lan.url]);
+
       var draftHotkey = React.useState(settings.hotkey);
       var hotkey = draftHotkey[0];
       var setHotkey = draftHotkey[1];
@@ -728,6 +968,10 @@ window.__ModuleLoader__.load({
       var draftPrompt = React.useState(settings.prompt);
       var prompt = draftPrompt[0];
       var setPrompt = draftPrompt[1];
+
+      var advancedState = React.useState(false);
+      var advanced = advancedState[0];
+      var setAdvanced = advancedState[1];
 
       var recordingState = React.useState(false);
       var recording = recordingState[0];
@@ -750,7 +994,12 @@ window.__ModuleLoader__.load({
         if (dirtySession.current && session.trim() === settings.sessionId) dirtySession.current = false;
         if (dirtyPrompt.current && prompt === settings.prompt) dirtyPrompt.current = false;
         if (!dirtyHotkey.current) setHotkey(settings.hotkey);
-        if (!dirtySession.current) setSession(settings.sessionId);
+        if (!dirtySession.current) {
+          if (session !== settings.sessionId) {
+            report("session-input -> " + settings.sessionId);
+          }
+          setSession(settings.sessionId);
+        }
         if (!dirtyPrompt.current) setPrompt(settings.prompt);
       }, [settings.hotkey, settings.sessionId, settings.prompt, setHotkey, setSession, setPrompt]);
 
@@ -777,7 +1026,8 @@ window.__ModuleLoader__.load({
         // The helper restarts asynchronously after a save; keep the status
         // line honest without asking every surface to poll.
         var timer = window.setInterval(function () { void fetchState(); }, 2500);
-        return function () { window.clearInterval(timer); };
+        var resendTimer = window.setInterval(function () { void pollResend(ctx); }, 2000);
+        return function () { window.clearInterval(timer); window.clearInterval(resendTimer); };
       }, []);
 
       // One event while armed; Esc cancels. Keyboard chords, mouse side
@@ -870,7 +1120,9 @@ window.__ModuleLoader__.load({
 
       async function commitSession() {
         var trimmed = session.trim();
+        report("session-click [" + trimmed + "]");
         if (trimmed !== "" && !validSessionId(trimmed)) {
+          report("session-reject [" + trimmed + "]");
           setNote({ level: "error", text: t("invalidSession") });
           return;
         }
@@ -886,6 +1138,8 @@ window.__ModuleLoader__.load({
           dirtySession.current = false;
           setSession(target);
           setNote({ level: "ok", text: t("saved") });
+          report("session-saved input=" + target + " host=" + settings.sessionId);
+          void fetchState();
         } catch (error) {
           setNote({ level: "error", text: messageOf(error) });
         } finally {
@@ -919,6 +1173,82 @@ window.__ModuleLoader__.load({
         }
       }
 
+      /** Flip the capture channel; the Host restarts the helper on change. */
+      async function commitBackend(value) {
+        var before = settings.captureBackend;
+        settings = { ...settings, captureBackend: value };
+        notify();
+        setBusy(true);
+        try {
+          var ok = await writeField("captureBackend", value);
+          if (!ok) {
+            settings = { ...settings, captureBackend: before };
+            notify();
+            setNote({ level: "error", text: t("saveFailed") });
+            return;
+          }
+          void fetchState();
+        } catch (error) {
+          settings = { ...settings, captureBackend: before };
+          notify();
+          setNote({ level: "error", text: messageOf(error) });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /** Generic segmented-control writer; reverts on failure. */
+      async function commitChoice(name, value) {
+        var before = settings[name];
+        settings = { ...settings, [name]: value };
+        notify();
+        setBusy(true);
+        try {
+          var ok = await writeField(name, value);
+          if (!ok) {
+            settings = { ...settings, [name]: before };
+            notify();
+            setNote({ level: "error", text: t("saveFailed") });
+            return;
+          }
+          void fetchState();
+        } catch (error) {
+          settings = { ...settings, [name]: before };
+          notify();
+          setNote({ level: "error", text: messageOf(error) });
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      /** Three-way / two-way segmented button group for the card. */
+      function segmented(options, current, onPick) {
+        return React.createElement("div", { style: { display: "flex", alignItems: "center" } },
+          options.map(function (option, index) {
+            var first = index === 0;
+            var last = index === options.length - 1;
+            return React.createElement("button", {
+              key: option.value,
+              type: "button",
+              disabled: busy || locked,
+              "aria-pressed": current === option.value,
+              style: {
+                padding: "4px 10px", fontSize: "12px", lineHeight: "20px",
+                cursor: (busy || locked) ? "default" : "pointer",
+                border: "0.5px solid var(--dsw-alias-border-l3)",
+                borderRight: last ? undefined : "none",
+                borderRadius: first ? "6px 0 0 6px" : (last ? "0 6px 6px 0" : "0"),
+                background: current === option.value ? "var(--dsw-alias-state-business-primary)" : "transparent",
+                color: current === option.value ? "#fff" : "var(--dsw-alias-label-secondary)",
+                fontWeight: current === option.value ? 600 : 400,
+              },
+              onClick: function () {
+                if (current !== option.value) void onPick(option.value);
+              },
+            }, option.label);
+          }));
+      }
+
       async function commitPrompt() {
         setBusy(true);
         try {
@@ -950,18 +1280,18 @@ window.__ModuleLoader__.load({
       function row(label, hint, control, fullWidth) {
         return React.createElement("div", {
           style: {
-            display: "flex", alignItems: "flex-start", gap: "12px", flexWrap: "wrap",
-            padding: "14px 0", borderTop: "0.5px solid var(--dsw-alias-border-l2)",
+            display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap",
+            padding: "7px 0", borderTop: "0.5px solid var(--dsw-alias-border-l2)",
           },
         },
         React.createElement("div", {
-          style: { flex: "1 1 200px", minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" },
+          style: { flex: "1 1 170px", minWidth: 0, display: "flex", flexDirection: "column", gap: "1px" },
         },
         React.createElement("span", {
-          style: { fontSize: "13px", fontWeight: 500, lineHeight: "1.5", color: "var(--dsw-alias-label-primary)" },
+          style: { fontSize: "12.5px", fontWeight: 500, lineHeight: "1.35", color: "var(--dsw-alias-label-primary)" },
         }, label),
         React.createElement("span", {
-          style: { fontSize: "12px", lineHeight: "1.5", color: "var(--dsw-alias-label-tertiary)" },
+          style: { fontSize: "11px", lineHeight: "1.35", color: "var(--dsw-alias-label-tertiary)" },
         }, hint)),
         React.createElement("div", {
           style: {
@@ -1047,7 +1377,7 @@ window.__ModuleLoader__.load({
       }, t("save")))),
 
       row(t("sessionLabel"), t("sessionHint"), React.createElement("div", {
-        style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0 },
+        style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end", minWidth: 0, flex: "1 1 100%" },
       },
       React.createElement("input", {
         value: session,
@@ -1056,19 +1386,48 @@ window.__ModuleLoader__.load({
         onChange: function (event) {
           dirtySession.current = true;
           setSession(event.target.value);
+          report("session-typed " + event.target.value.trim());
+        },
+        onBlur: function () {
+          if (dirtySession.current) void commitSession();
         },
         onKeyDown: function (event) {
           if (event.key === "Enter") void commitSession();
         },
-        style: { ...INPUT_STYLE, flex: "1 1 180px", width: "min(320px, 100%)", maxWidth: "100%", minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: "12px" },
+        title: session,
+        style: { ...INPUT_STYLE, flex: "1 1 260px", width: "100%", maxWidth: "100%", minWidth: 0, fontFamily: "ui-monospace, monospace", fontSize: "11px", padding: "4px 8px" },
       }),
       React.createElement("button", {
         type: "button",
         style: SMALL_BUTTON_STYLE,
         disabled: busy || locked,
         onClick: function () { void commitSession(); },
-      }, busy ? t("saving") : t("save")))),
+      }, busy ? t("saving") : t("save")),
+      React.createElement("button", {
+        type: "button",
+        style: SMALL_BUTTON_STYLE,
+        disabled: locked || session.trim() === "",
+        onClick: function () {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              void navigator.clipboard.writeText(session.trim());
+              setNote({ level: "ok", text: t("copied") });
+            }
+          } catch {
+            // clipboard unavailable
+          }
+        },
+      }, t("copy")))),
 
+      React.createElement("div", {
+        style: { display: "flex", justifyContent: "flex-start", paddingTop: "4px" },
+      }, React.createElement("button", {
+        type: "button",
+        onClick: function () { setAdvanced(function (open) { return !open; }); },
+        style: { ...SMALL_BUTTON_STYLE, padding: "2px 0", border: "none", background: "transparent", color: "var(--dsw-alias-label-secondary)" },
+      }, advanced ? t("advancedHide") : t("advancedShow"))),
+
+      advanced ? React.createElement("div", { style: { display: "contents" } },
       row(t("allScreensLabel"), t("allScreensHint"), React.createElement("button", {
         type: "button",
         role: "switch",
@@ -1088,6 +1447,194 @@ window.__ModuleLoader__.load({
       }, React.createElement("span", {
         style: {
           position: "absolute", top: "2px", left: settings.allScreens ? "18px" : "2px",
+          width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
+        },
+      }))),
+
+      row(t("protectLabel"), t("protectHint"), React.createElement("button", {
+        type: "button",
+        role: "switch",
+        "aria-checked": settings.clearProtection,
+        disabled: locked,
+        style: {
+          width: "36px", height: "20px", padding: "0", border: "none", borderRadius: "10px",
+          position: "relative", cursor: locked ? "default" : "pointer",
+          background: settings.clearProtection ? "var(--dsw-alias-state-business-primary)" : "var(--dsw-alias-border-l4)",
+        },
+        onClick: function () {
+          void writeField("clearProtection", !settings.clearProtection).then(function (ok) {
+            if (!ok) setNote({ level: "error", text: t("saveFailed") });
+            void fetchState();
+          });
+        },
+      }, React.createElement("span", {
+        style: {
+          position: "absolute", top: "2px", left: settings.clearProtection ? "18px" : "2px",
+          width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
+        },
+      }))),
+
+      row(t("backendLabel"), t("backendHint"), React.createElement("div", {
+        style: { display: "flex", alignItems: "center" },
+      },
+      React.createElement("button", {
+        type: "button",
+        disabled: busy || locked,
+        "aria-pressed": settings.captureBackend === "auto",
+        style: {
+          padding: "4px 10px", fontSize: "12px", lineHeight: "20px",
+          cursor: (busy || locked) ? "default" : "pointer",
+          border: "0.5px solid var(--dsw-alias-border-l3)",
+          borderRight: "none", borderRadius: "6px 0 0 6px",
+          background: settings.captureBackend === "auto" ? "var(--dsw-alias-state-business-primary)" : "transparent",
+          color: settings.captureBackend === "auto" ? "#fff" : "var(--dsw-alias-label-secondary)",
+          fontWeight: settings.captureBackend === "auto" ? 600 : 400,
+        },
+        onClick: function () {
+          if (settings.captureBackend !== "auto") void commitBackend("auto");
+        },
+      }, t("backendAuto")),
+      React.createElement("button", {
+        type: "button",
+        disabled: busy || locked,
+        "aria-pressed": settings.captureBackend === "dxgi",
+        style: {
+          padding: "4px 10px", fontSize: "12px", lineHeight: "20px",
+          cursor: (busy || locked) ? "default" : "pointer",
+          border: "0.5px solid var(--dsw-alias-border-l3)",
+          borderRight: "none",
+          background: settings.captureBackend === "dxgi" ? "var(--dsw-alias-state-business-primary)" : "transparent",
+          color: settings.captureBackend === "dxgi" ? "#fff" : "var(--dsw-alias-label-secondary)",
+          fontWeight: settings.captureBackend === "dxgi" ? 600 : 400,
+        },
+        onClick: function () {
+          if (settings.captureBackend !== "dxgi") void commitBackend("dxgi");
+        },
+      }, t("backendDxgi")),
+      React.createElement("button", {
+        type: "button",
+        disabled: busy || locked,
+        "aria-pressed": settings.captureBackend === "gdi",
+        style: {
+          padding: "4px 10px", fontSize: "12px", lineHeight: "20px",
+          cursor: (busy || locked) ? "default" : "pointer",
+          border: "0.5px solid var(--dsw-alias-border-l3)",
+          borderRadius: "0 6px 6px 0",
+          background: settings.captureBackend === "gdi" ? "var(--dsw-alias-state-business-primary)" : "transparent",
+          color: settings.captureBackend === "gdi" ? "#fff" : "var(--dsw-alias-label-secondary)",
+          fontWeight: settings.captureBackend === "gdi" ? 600 : 400,
+        },
+        onClick: function () {
+          if (settings.captureBackend !== "gdi") void commitBackend("gdi");
+        },
+      }, t("backendGdi")))),
+
+      row(t("targetLabel"), t("targetHint"), segmented([
+        { value: "auto", label: t("targetAuto") },
+        { value: "window", label: t("targetWindow") },
+        { value: "screen", label: t("targetScreen") },
+      ], settings.captureTarget, function (value) { return commitChoice("captureTarget", value); })),
+
+      row(t("formatLabel"), t("formatHint"), segmented([
+        { value: "png", label: t("formatPng") },
+        { value: "jpg", label: t("formatJpg") },
+      ], settings.imageFormat, function (value) { return commitChoice("imageFormat", value); })),
+      ) : null,
+
+      row(t("prebufferLabel"), t("prebufferHint"), React.createElement("button", {
+        type: "button",
+        role: "switch",
+        "aria-checked": settings.prebuffer,
+        disabled: locked,
+        style: {
+          width: "36px", height: "20px", padding: "0", border: "none", borderRadius: "10px",
+          position: "relative", cursor: locked ? "default" : "pointer",
+          background: settings.prebuffer ? "var(--dsw-alias-state-business-primary)" : "var(--dsw-alias-border-l4)",
+        },
+        onClick: function () {
+          void writeField("prebuffer", !settings.prebuffer).then(function (ok) {
+            if (!ok) setNote({ level: "error", text: t("saveFailed") });
+            void fetchState();
+          });
+        },
+      }, React.createElement("span", {
+        style: {
+          position: "absolute", top: "2px", left: settings.prebuffer ? "18px" : "2px",
+          width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
+        },
+      }))),
+
+      row(t("followLabel"), t("followHint"), segmented([
+        { value: "auto", label: t("followAuto") },
+        { value: "always", label: t("followAlways") },
+        { value: "never", label: t("followNever") },
+      ], settings.imageFollowUp, function (value) { return commitChoice("imageFollowUp", value); })),
+
+      row(t("lanLabel"), t("lanHint"), React.createElement("div", {
+        style: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", flex: "1 1 320px", minWidth: 0 },
+      },
+      qrDataUrl ? React.createElement("div", {
+        style: { display: "flex", justifyContent: "flex-end" },
+      }, React.createElement("img", {
+        src: qrDataUrl,
+        alt: "LAN QR",
+        style: { width: "148px", height: "148px", borderRadius: "8px", background: "#fff", padding: "6px", display: "block" },
+      })) : null,
+      React.createElement("div", {
+        style: { display: "flex", alignItems: "center", gap: "8px", justifyContent: "flex-end" },
+      },
+      React.createElement("span", {
+        style: { fontSize: "12px", color: "var(--dsw-alias-label-secondary)" },
+      }, settings.lanEnabled ? t("lanOn") : t("lanOff")),
+      React.createElement("button", {
+        type: "button",
+        role: "switch",
+        "aria-checked": settings.lanEnabled,
+        disabled: locked,
+        style: {
+          width: "36px", height: "20px", padding: "0", border: "none", borderRadius: "10px",
+          position: "relative", cursor: locked ? "default" : "pointer",
+          background: settings.lanEnabled ? "var(--dsw-alias-state-business-primary)" : "var(--dsw-alias-border-l4)",
+        },
+        onClick: function () {
+          void writeField("lanEnabled", !settings.lanEnabled).then(function (ok) {
+            if (!ok) setNote({ level: "error", text: t("saveFailed") });
+            void fetchState();
+          });
+        },
+      }, React.createElement("span", {
+        style: {
+          position: "absolute", top: "2px", left: settings.lanEnabled ? "18px" : "2px",
+          width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
+        },
+      }))),
+      React.createElement("input", {
+        readOnly: true,
+        value: hostState.lan && hostState.lan.url ? hostState.lan.url : "",
+        spellCheck: false,
+        onFocus: function (event) { event.target.select(); },
+        style: { ...INPUT_STYLE, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: "12px" },
+      }))),
+
+      row(t("fastAnswerLabel"), t("fastAnswerHint"), React.createElement("button", {
+        type: "button",
+        role: "switch",
+        "aria-checked": settings.fastAnswer,
+        disabled: locked,
+        style: {
+          width: "36px", height: "20px", padding: "0", border: "none", borderRadius: "10px",
+          position: "relative", cursor: locked ? "default" : "pointer",
+          background: settings.fastAnswer ? "var(--dsw-alias-state-business-primary)" : "var(--dsw-alias-border-l4)",
+        },
+        onClick: function () {
+          void writeField("fastAnswer", !settings.fastAnswer).then(function (ok) {
+            if (!ok) setNote({ level: "error", text: t("saveFailed") });
+            void fetchState();
+          });
+        },
+      }, React.createElement("span", {
+        style: {
+          position: "absolute", top: "2px", left: settings.fastAnswer ? "18px" : "2px",
           width: "16px", height: "16px", borderRadius: "8px", background: "#fff",
         },
       }))),
@@ -1247,3 +1794,19 @@ window.__ModuleLoader__.load({
     };
   },
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

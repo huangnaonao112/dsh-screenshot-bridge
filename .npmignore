@@ -1,0 +1,8 @@
+# runtime / dev artifacts that must never be published
+.web-corpus/
+.fig-test/
+.toolchain/
+.shots/
+bin/.shots/
+*.log
+*.tgz

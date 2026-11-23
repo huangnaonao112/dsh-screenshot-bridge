@@ -4,4 +4,6 @@
       config:
         hotkey: Alt+Z
         allScreens: false
+        captureBackend: auto
+        clearProtection: true
         prompt: 我给的截图里面有一些题，你根据截图里的题目按顺序给出答案。只给干净的答案，不要给思考过程

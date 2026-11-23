@@ -1,6 +1,6 @@
 {
   "name": "dsh-screenshot-bridge",
-  "version": "1.5.1",
+  "version": "1.15.0",
   "description": "DeepSeek Harness 截图桥：全局快捷键或鼠标侧键截屏，本地把题面和题图拆出来再发送到指定会话。",
   "type": "module",
   "license": "MIT",
@@ -39,6 +39,12 @@
     "client.js",
     "extract.mjs",
     "engine.mjs",
+    "ocr-server.mjs",
+    "ocr-server.mjs",
+    "lan.mjs",
+    "lan-page.html",
+    "qr.mjs",
+    "vendor/qrcode.cjs",
     "test-suite.mjs",
     "test-matrix.mjs",
     "extract.py",
@@ -47,6 +53,19 @@
     "models/*.onnx",
     "models/*.txt",
     "hotkey.ps1",
+    "bin/*",
+    "capture/README.md",
+    "capture/*.ps1",
+    "capture/shotcap/*.cpp",
+    "capture/shotcap/build.ps1",
+    "capture/daemon/*.cpp",
+    "capture/daemon/build.ps1",
+    "capture/wda/*.cpp",
+    "capture/wda/build.ps1",
+    "capture/kdrv/*.c",
+    "capture/kdrv/*.cpp",
+    "capture/kdrv/build.ps1",
+    "capture/kdrv/install.ps1",
     "cordis.patch.yml",
     "locale/*.json",
     "docs/DETAIL.md",
@@ -85,3 +104,16 @@
     "sharp": "^0.35.5"
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

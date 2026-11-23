@@ -351,7 +351,15 @@ function mergeComps(comps, gapY) {
 }
 
 /** "被文字盖住的是字，抹掉字剩下的墨迹就是图" → 圈矩形 */
-function detectFigures(px, boxes, lh, tally) {
+function detectFigures(px, boxes, lh, tally, limits) {
+  const cfg = limits ?? {};
+  const minW = cfg.minW ?? 130;
+  const minH = cfg.minH ?? 80;
+  const minFactor = cfg.minFactor ?? 2.2;
+  const maxCov = cfg.maxCov ?? 0.3;
+  const minDensity = cfg.minDensity ?? 0.02;
+  const maxDensity = cfg.maxDensity ?? 0.45;
+  const textShareMax = cfg.textShareMax ?? 0.16;
   const { gray, W, H } = px;
   const dbg = process.env.DSH_EXTRACT_DEBUG === "1";
   const textShareOf = (b) => {
@@ -372,7 +380,7 @@ function detectFigures(px, boxes, lh, tally) {
     if (tally && (why === "huge" || why === "cov/density")
       && (b.x2 - b.x) >= lh * 6 && (b.y2 - b.y) >= lh * 4) {
       const d = b.ink / Math.max(1, (b.x2 - b.x) * (b.y2 - b.y));
-      if (d >= 0.015 && d <= 0.35 && textShareOf(b) <= 0.12) tally.suspect = (tally.suspect ?? 0) + 1;
+      // 下界必须低于放宽阈值(0.008)，否则 0.008–0.015 之间的大图永远不会触发重试。\n      if (d >= 0.006 && d <= 0.35 && textShareOf(b) <= 0.12) tally.suspect = (tally.suspect ?? 0) + 1;
     }
   };
   const ink = new Uint8Array(W * H);
@@ -410,7 +418,7 @@ function detectFigures(px, boxes, lh, tally) {
     const h = b.y2 - b.y;
     if (dbg) console.error("[fig:cand]", b.x, b.y, w, h, b.ink, (b.ink / Math.max(1, w * h)).toFixed(3));
     // 太小的是图标/工具栏按钮，太大的是整块白卡片，都不是题图。
-    if (w < 130 || h < 80 || w < lh * 2.2 || h < lh * 2.2) { drop("small", b, `lh=${lh}`); continue; }
+    if (w < minW || h < minH || w < lh * minFactor || h < lh * minFactor) { drop("small", b, `lh=${lh}`); continue; }
     if (w * h > W * H * 0.15) { drop("huge", b, W * H * 0.15); continue; }
     if (w / h > 8 && h < lh * 4) { drop("wide", b); continue; }
     let covered = 0;
@@ -430,10 +438,10 @@ function detectFigures(px, boxes, lh, tally) {
     // 成段的字就是段落。但图题里常有 ①②③ 这种小标号，字少、占面积也小，
     // 不能因为它就把整块图判掉，所以字数和"字迹占块面积"要一起看。
     const textShare = insideArea / Math.max(1, w * h);
-    if (insideChars >= 20 && textShare > 0.16) { drop("text-block", b, `chars=${insideChars} share=${textShare.toFixed(3)}`); continue; }
+    if (insideChars >= 20 && textShare > textShareMax) { drop("text-block", b, `chars=${insideChars} share=${textShare.toFixed(3)}`); continue; }
     const cov = covered / Math.max(1, w * h);
     const density = b.ink / Math.max(1, w * h);
-    if (cov > 0.3 || density < 0.02 || density > 0.45) { drop("cov/density", b, `cov=${cov.toFixed(3)} d=${density.toFixed(3)}`); continue; }
+    if (cov > maxCov || density < minDensity || density > maxDensity) { drop("cov/density", b, `cov=${cov.toFixed(3)} d=${density.toFixed(3)}`); continue; }
     figs.push({ ...b, cov: Math.round(cov * 1000) / 1000 });
   }
 
@@ -536,6 +544,133 @@ function vRulings(px) {
  * 用框线当行列边界，把 OCR 出来的行按中心点丢进单元格，按行拼「a | b | c」。
  * 认不出来也不影响原有输出，只是多一段【表格重排】。
  */
+/**
+ * 无框线 / 框线太淡的表格：按 OCR 坐标重排。
+ * 判定：连续的 ≥3 行，每行 ≥3 个短单元格、其中至少 2 个像数字；
+ * 列由这些行的 x 中心聚类得到。散文行每行只有 1 段，不会误判。
+ */
+function tablesByGrid(lines, lh) {
+  const isShort = (t) => t.length <= 12;
+  const isNum = (t) => /^[\d.,%+\-]+$/u.test(t) || /^[\d.,]+(万|亿|%|元|年|个)?$/u.test(t);
+
+  const sorted = [...lines].filter((ln) => ln.text !== "").sort((a, b) => a.y - b.y);
+  const cluster = [];
+  for (const ln of sorted) {
+    const cy = (ln.y + ln.y2) / 2;
+    const row = cluster[cluster.length - 1];
+    if (row === undefined || Math.abs(cy - row.cy) > lh * 0.55) {
+      cluster.push({ cy, items: [ln] });
+    } else {
+      row.cy = (row.cy * row.items.length + cy) / (row.items.length + 1);
+      row.items.push(ln);
+    }
+  }
+
+  const cand = cluster.map((row) => {
+    const items = row.items;
+    if (items.length < 3) return null;
+    const nums = items.filter((item) => isNum(item.text)).length;
+    const shorts = items.filter((item) => isShort(item.text)).length;
+    return nums >= 2 && shorts >= items.length * 0.6 ? items : null;
+  });
+
+  // 一页可以有多张表：每一段连续 ≥3 行的候选都单独成表，不再只留最长的那一块。
+  const runs = [];
+  for (let i = 0; i < cand.length; i += 1) {
+    if (cand[i] === null) continue;
+    let j = i;
+    while (j + 1 < cand.length && cand[j + 1] !== null) j += 1;
+    if (j - i + 1 >= 3) runs.push({ start: i, end: j, rows: cand.slice(i, j + 1) });
+    i = j;
+  }
+
+  const tables = [];
+  for (const run of runs) {
+    const centers = [];
+    for (const row of run.rows) for (const item of row) centers.push((item.x + item.x2) / 2);
+    centers.sort((a, b) => a - b);
+    const cols = [];
+    for (const center of centers) {
+      const last = cols[cols.length - 1];
+      if (last === undefined || center - last.last > lh * 0.9) cols.push({ center, last: center });
+      else last.last = center;
+    }
+    if (cols.length < 3 || cols.length > 12) continue;
+
+    const bounds = [];
+    for (let k = 0; k + 1 < cols.length; k += 1) bounds.push((cols[k].last + cols[k + 1].center) / 2);
+    const colOf = (x) => {
+      let k = 0;
+      while (k < bounds.length && x > bounds[k]) k += 1;
+      return k;
+    };
+    const render = (row) => {
+      const cells = new Array(cols.length).fill("");
+      for (const item of row) {
+        const index = colOf((item.x + item.x2) / 2);
+        cells[index] = cells[index] === "" ? item.text : cells[index] + " " + item.text;
+      }
+      return cells.map((cell) => cell.trim()).join(" | ");
+    };
+
+    // 表头最多两行；合并单元格按"覆盖到几列"写进每一列，最后每列用 "/" 合并成一行。
+    const span = cols[cols.length - 1].last - cols[0].center;
+    const headerLabels = new Array(cols.length).fill("");
+    const headerItems = [];
+    for (let h = Math.max(0, run.start - 2); h < run.start; h += 1) {
+      const headerCluster = cluster[h];
+      if (headerCluster === undefined) continue;
+      for (const item of headerCluster.items) {
+        const cx = (item.x + item.x2) / 2;
+        if (cx < cols[0].center - span * 0.15 || cx > cols[cols.length - 1].last + span * 0.15) continue;
+        // 合并单元格按"列中心落在 [x, x2] 内"判定覆盖范围；用边界判定会被
+        // 相邻列的字尾（如"住宿预订"的右边界）带偏，把隔壁列的表头也串进来。
+        const covered = [];
+        for (let k = 0; k < cols.length; k += 1) {
+          const rep = (cols[k].center + cols[k].last) / 2;
+          if (rep >= item.x - lh * 0.3 && rep <= item.x2 + lh * 0.3) covered.push(k);
+        }
+        for (const k of covered) {
+          if (headerLabels[k] === "") headerLabels[k] = item.text;
+          else if (!headerLabels[k].includes(item.text)) headerLabels[k] += "/" + item.text;
+        }
+        headerItems.push(item);
+      }
+    }
+
+    const rows = [];
+    const headerText = headerLabels.map((cell) => cell.trim()).join(" | ");
+    if (headerText.replace(/[\s|]/gu, "") !== "") rows.push(headerText);
+    for (const row of run.rows) rows.push(render(row));
+
+    let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
+    for (const row of [...run.rows, headerItems]) for (const item of row) {
+      minX = Math.min(minX, item.x); minY = Math.min(minY, item.y);
+      maxX = Math.max(maxX, item.x2); maxY = Math.max(maxY, item.y2);
+    }
+    if (rows.filter((row) => row.split(" | ").filter((cell) => cell !== "").length >= 2).length < 2) continue;
+
+    tables.push({
+      rows: rows.slice(0, 40),
+      cols: cols.length,
+      lines: rows.length,
+      by: "grid",
+      rect: { x: minX, y: minY, x2: maxX, y2: maxY },
+    });
+  }
+  return tables;
+}
+
+/** 两个矩形重叠比例（相对较小者），用来去掉"框线表 + 网格表"的重复。 */
+function overlapRatio(a, b) {
+  if (a === undefined || b === undefined) return 0;
+  const ix = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x, b.x));
+  const iy = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y, b.y));
+  const areaA = Math.max(1, (a.x2 - a.x) * (a.y2 - a.y));
+  const areaB = Math.max(1, (b.x2 - b.x) * (b.y2 - b.y));
+  return (ix * iy) / Math.min(areaA, areaB);
+}
+
 function tableOf(px, lines, lh) {
   const hs = hRulings(px);
   const vs = vRulings(px);
@@ -566,7 +701,8 @@ function tableOf(px, lines, lh) {
   }
   const solid = rows.filter((row) => row.split(" | ").filter((p) => p !== "").length >= 2);
   if (solid.length < 2) return null;
-  return { rows: rows.slice(0, 40), cols: vs.length - 1, lines: hs.length + vs.length };
+  const rect = { x: vs[0], y: hs[0], x2: vs[vs.length - 1], y2: hs[hs.length - 1] };
+  return { rows: rows.slice(0, 40), cols: vs.length - 1, lines: hs.length + vs.length, rect };
 }
 
 /* ------------------------------------------------------------ 主流程 */
@@ -879,66 +1015,114 @@ export async function extractFile(imagePath, figuresDir, engine) {
 
   let text = out.map((o) => (o.kind === "opt" ? "    " : "") + o.txt).join("\n");
   const body = out.filter((o) => o.kind === "stem" || o.kind === "opt");
-  const ok = body.length > 0 && !(listMode && warns.length > 3);
+  const ok = body.length > 0;
 
   const figures = [];
   const tally = { suspect: 0 };
-  if (body.length > 0) {
-    const top = 0;
+  if (figuresDir) await mkdir(figuresDir, { recursive: true }).catch(() => {});
+  const figs = [];
+  // 细线图（六宫格、坐标轴、电路图）墨迹占比常低于 2%，默认阈值会把它们甩掉。
+  // 先按默认跑；一张都没留下来、但记过"可疑大块"，就用放宽阈值重跑一次。
+  const RELAXED = {
+    minW: 96, minH: 64, minFactor: 1.8, maxCov: 0.45,
+    minDensity: 0.008, maxDensity: 0.5, textShareMax: 0.24,
+  };
+  {
     const bottom = px.H * 0.93;
-    const left = baseX - lh * 4.0;
-    let figs = detectFigures(px, allBoxes, lh, tally).filter((f) => {
+    // 左边的容忍度给到 8 个字高：居中的宽图会从文本列左边界的外面开始，
+    // 4 个字高会把这类图当"边栏"扔掉（右侧边栏仍由 inColumn 的右界挡）。
+    const left = baseX - lh * 8.0;
+    const keep = (f) => {
       const cy = (f.y + f.y2) / 2;
-      // 右边栏（微信码、客服浮窗、摄像头）里的东西一律不算题图：它的左边已经跑到题面列外面了。
       const inColumn = f.x < baseX + indent + lh * 5;
-      const keep = cy >= top && cy <= bottom && f.x2 > left && inColumn;
-      if (process.env.DSH_EXTRACT_DEBUG === "1" && !keep) {
-        console.error("[fig:window-drop]", f.x, f.y, f.x2 - f.x, f.y2 - f.y, `cy=${Math.round(cy)} top=${Math.round(top)} bottom=${Math.round(bottom)} left=${Math.round(left)} inCol=${inColumn}`);
+      const ok = cy >= 0 && cy <= bottom && f.x2 > left && inColumn;
+      if (process.env.DSH_EXTRACT_DEBUG === "1" && !ok) {
+        console.error("[fig:window-drop]", f.x, f.y, f.x2 - f.x, f.y2 - f.y, `cy=${Math.round(cy)} inCol=${inColumn}`);
       }
-      return keep;
-    });
-
-    for (const f of figs) {
-      let q = null;
-      for (const o of out) {
-        if (o.kind !== "stem" || o.y > f.y) continue;
-        const m = /^(\d+)、/u.exec(o.txt);
-        q = m ? Number(m[1]) : q;
+      return ok;
+    };
+    // DSH_EXTRACT_FORCE_RELAXED 只给自测用：跳过默认阈值，验证放宽规则本身有效。
+    const forceRelaxed = process.env.DSH_EXTRACT_FORCE_RELAXED === "1";
+    let kept = forceRelaxed ? [] : detectFigures(px, allBoxes, lh, tally).filter(keep);
+    if (forceRelaxed || tally.suspect > 0) {
+      // 不只在"一张都没留下"时放宽：一页里同时有大图和小图时，小图会被默认阈值
+      // 先筛掉，这时也要补进来。只并"和已有块不重叠"的新块，避免重复。
+      const retried = detectFigures(px, allBoxes, lh, tally, RELAXED).filter(keep);
+      const overlap = (a, b) => {
+        const ix = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x, b.x));
+        const iy = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y, b.y));
+        const inter = ix * iy;
+        const area = Math.max(1, (a.x2 - a.x) * (a.y2 - a.y));
+        const other = Math.max(1, (b.x2 - b.x) * (b.y2 - b.y));
+        return inter / Math.min(area, other);
+      };
+      let added = 0;
+      for (const candidate of retried) {
+        if (kept.some((existing) => overlap(existing, candidate) > 0.3)) continue;
+        kept.push(candidate);
+        added += 1;
       }
-      f.q = q;
+      if (added > 0) {
+        stats.figureRelaxed = true;
+        stats.figureRelaxedAdded = added;
+        kept.sort((a, b) => a.y - b.y);
+      }
     }
-    figs.sort((a, b) => a.y - b.y);
-    if (figuresDir) await mkdir(figuresDir, { recursive: true }).catch(() => {});
-    const stemName = path.basename(imagePath, path.extname(imagePath)).slice(0, 16);
-    let index = 0;
-    for (const f of figs) {
-      index += 1;
-      f.n = index;
-      const pad = Math.max(8, Math.round(lh * 0.9));
-      // 外扩不能把上下相邻的题干/选项字吃进画里（PDF 页上常见），
-      // 所以上下留白最多到"离最近一行文字还剩 3px"为止。
-      let padTop = pad;
-      let padBottom = pad;
-      for (const b of allBoxes) {
-        const ov = Math.min(f.x2, b.x2) - Math.max(f.x, b.x);
-        if (ov < Math.min(f.x2 - f.x, b.w) * 0.5) continue;
-        if (b.y2 <= f.y && f.y - b.y2 < padTop) padTop = Math.max(3, f.y - b.y2 - 3);
-        if (b.y >= f.y2 && b.y - f.y2 < padBottom) padBottom = Math.max(3, b.y - f.y2 - 3);
-      }
-      const x1 = Math.max(0, f.x - pad);
-      const y1 = Math.max(0, f.y - padTop);
-      const x2 = Math.min(px.W, f.x2 + pad);
-      const y2 = Math.min(px.H, f.y2 + padBottom);
-      const record = { n: index, q: f.q, label: f.label, w: x2 - x1, h: y2 - y1, cov: f.cov };
-      if (figuresDir) {
-        const file = path.join(figuresDir, `${stemName}-fig${index}.png`);
-        await sharp(imagePath).extract({ left: x1, top: y1, width: x2 - x1, height: y2 - y1 }).png().toFile(file);
-        record.file = file;
-      }
-      figures.push(record);
-    }
-    figs.sort((a, b) => a.y - b.y);
+    figs.push(...kept);
+  }
 
+  for (const f of figs) {
+    let q = null;
+    for (const o of out) {
+      if (o.kind !== "stem" || o.y > f.y) continue;
+      const m = /^(\d+)、/u.exec(o.txt);
+      q = m ? Number(m[1]) : q;
+    }
+    f.q = q;
+  }
+  figs.sort((a, b) => a.y - b.y);
+  if (figuresDir && figs.length > 0) await mkdir(figuresDir, { recursive: true }).catch(() => {});
+  const stemName = path.basename(imagePath, path.extname(imagePath)).slice(0, 16);
+  let index = 0;
+  for (const f of figs) {
+    index += 1;
+    f.n = index;
+    const pad = Math.max(10, Math.round(lh * 1.6));
+    // 横向多留一点：坐标轴刻度/柱状图例在墨迹左边 ~2 个字高。
+    const padX = Math.max(12, Math.round(lh * 2.4));
+    let padTop = pad;
+    let padBottom = pad;
+    for (const b of allBoxes) {
+      const ov = Math.min(f.x2, b.x2) - Math.max(f.x, b.x);
+      if (ov < Math.min(f.x2 - f.x, b.w) * 0.5) continue;
+      // 坐标轴刻度、柱顶数值、①②③ 这类短标号是图的一部分：它们被 OCR 涂掉了，
+      // 但外扩时不能因为它们而缩到 3px，否则坐标轴数字会被裁掉。
+      if (width(b.text) <= 4 && /^[\d.,%+()（）\-—①-⑳]+$/u.test(b.text)) continue;
+      if (b.y2 <= f.y && f.y - b.y2 < padTop) padTop = Math.max(3, f.y - b.y2 - 3);
+      if (b.y >= f.y2 && b.y - f.y2 < padBottom) padBottom = Math.max(3, b.y - f.y2 - 3);
+    }
+    const x1 = Math.max(0, f.x - padX);
+    const y1 = Math.max(0, f.y - padTop);
+    const x2 = Math.min(px.W, f.x2 + padX);
+    const y2 = Math.min(px.H, f.y2 + padBottom);
+    const record = { n: index, q: f.q, label: f.label, w: x2 - x1, h: y2 - y1, cov: f.cov };
+    if (figuresDir) {
+      const file = path.join(figuresDir, `${stemName}-fig${index}.png`);
+      const scale = (x2 - x1) < 700 && (y2 - y1) < 500 ? 2 : 1;
+      await sharp(imagePath)
+        .extract({ left: x1, top: y1, width: x2 - x1, height: y2 - y1 })
+        .resize({ width: (x2 - x1) * scale, kernel: "lanczos3" })
+        .png()
+        .toFile(file);
+      record.file = file;
+      record.w = (x2 - x1) * scale;
+      record.h = (y2 - y1) * scale;
+      record.scale = scale;
+    }
+    figures.push(record);
+  }
+
+  if (body.length > 0 && figs.length > 0) {
     const merged = [];
     let fi = 0;
     const ordered = figs;
@@ -972,6 +1156,8 @@ export async function extractFile(imagePath, figuresDir, engine) {
   // 本地自己查一遍：题号跳号、某题选项没认全。这两类都是"我看漏了"，
   // 交给上层在提示词里说出来，同时因为原图必发，模型能自己核对。
   const warnings = [];
+  const incomplete = [];
+  if (stats.figureRelaxed) warnings.push("题图检测用了放宽规则（细线图墨迹很淡），如缺图请看原图");
   const stemNos = out.filter((o) => o.kind === "stem").map((o) => {
     const m = /^(\d{1,3})、/u.exec(o.txt);
     return m ? Number(m[1]) : null;
@@ -999,22 +1185,63 @@ export async function extractFile(imagePath, figuresDir, engine) {
       const stem = out.find((o) => o.kind === "stem" && new RegExp(`^${no}、`, "u").test(o.txt));
       const body = stem === undefined ? "" : stem.txt.replace(/^\d{1,3}、/u, "");
       const choice = stem !== undefined && looksChoice.test(stem.txt);
-      if (body.length < 8 && c === 0) warnings.push(`第${no}题只认到题号，题干和选项都没认出来`);
-      else if (c === 1 || (c === 0 && choice)) warnings.push(`第${no}题选项不全（认到 ${c} 个）`);
+      if (body.length < 8 && c === 0) {
+        warnings.push(`第${no}题只认到题号，题干和选项都没认出来`);
+        incomplete.push(no);
+      } else if (c === 1 || (c === 0 && choice)) {
+        warnings.push(`第${no}题选项不全（认到 ${c} 个）`);
+        incomplete.push(no);
+      }
     }
   }
 
 
   // 有框线的表格：额外按单元格重排一段，避免整行被拍成一句话；不影响上面的原有结果。
-  let table = null;
+  const tableList = [];
   try {
-    table = tableOf(px, allBoxes, lh);
+    const ruled = tableOf(px, allBoxes, lh);
+    if (ruled !== null) tableList.push(ruled);
+    for (const candidate of tablesByGrid(allBoxes, lh)) {
+      if (tableList.some((existing) => overlapRatio(existing.rect, candidate.rect) > 0.3)) continue;
+      tableList.push(candidate);
+    }
   } catch (error) {
     if (process.env.DSH_EXTRACT_DEBUG === "1") console.error("[table] failed", error.message);
   }
-  if (table) {
-    if (process.env.DSH_EXTRACT_DEBUG === "1") console.error("[table]", table.cols, table.lines, JSON.stringify(table.rows));
-    text += `\n\n【表格重排】${table.cols} 列\n${table.rows.join("\n")}`;
+  const table = tableList.length > 0 ? tableList[0] : null;
+  for (let ti = 0; ti < tableList.length; ti += 1) {
+    const tb = tableList[ti];
+    if (process.env.DSH_EXTRACT_DEBUG === "1") console.error("[table]", ti + 1, tb.cols, tb.lines, JSON.stringify(tb.rows));
+    const prefix = tableList.length > 1 ? `表${ti + 1} · ` : "";
+    text += `\n\n【表格重排】${prefix}${tb.cols} 列\n${tb.rows.join("\n")}`;
+    // 数字最容易认错，表格区域单独裁一张附给模型（不进〔图N〕占位）。
+    if (figuresDir && tb.rect !== undefined) {
+      const pad = Math.max(6, Math.round(lh * 0.5));
+      const padTop = Math.max(pad, Math.round(lh * 1.2));
+      const x1 = Math.max(0, tb.rect.x - pad);
+      const y1 = Math.max(0, tb.rect.y - padTop);
+      const x2 = Math.min(px.W, tb.rect.x2 + pad);
+      const y2 = Math.min(px.H, tb.rect.y2 + pad);
+      if (x2 - x1 > 60 && y2 - y1 > 30) try {
+        const stem = path.basename(imagePath, path.extname(imagePath)).slice(0, 16);
+        const file = path.join(figuresDir, tableList.length > 1 ? `${stem}-table${ti + 1}.png` : `${stem}-table.png`);
+        // 2x 只给小图；大图 1x 已经够读，放大一倍等于多送一倍 token。
+        const scale = (x2 - x1) < 700 && (y2 - y1) < 500 ? 2 : 1;
+        await sharp(imagePath)
+          .extract({ left: x1, top: y1, width: x2 - x1, height: y2 - y1 })
+          .resize({ width: (x2 - x1) * scale, kernel: "lanczos3" })
+          .png()
+          .toFile(file);
+        figures.push({
+          n: figures.length + 1, q: null,
+          label: tableList.length > 1 ? `表格${ti + 1}` : "表格",
+          kind: "table",
+          w: (x2 - x1) * scale, h: (y2 - y1) * scale, scale, file,
+        });
+      } catch (error) {
+        if (process.env.DSH_EXTRACT_DEBUG === "1") console.error("[table-crop]", error.message);
+      }
+    }
   }
 
   // 题面自己在说"如下图/所示/坐标图"却不带图，多半是我没认出来 → 让上层把原截图补上。
@@ -1031,7 +1258,9 @@ export async function extractFile(imagePath, figuresDir, engine) {
     hint,
     gaps: warns,
     warnings,
+    incomplete,
     table: table === null ? null : { cols: table.cols, rows: table.rows.length },
+    tables: tableList.map((tb) => ({ cols: tb.cols, rows: tb.rows.length, by: tb.by ?? "ruled" })),
     stats,
   };
 }
@@ -1073,3 +1302,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(1);
   }
 }
+
+
+
+
+
+
+
+
+
