@@ -9,25 +9,29 @@
   @media (prefers-color-scheme: dark) { :root { --fg:#eee; --dim:#9aa0a6; --bg:#141516; --card:#1d1f21; --line:#2b2e31; --accent:#4f8cff; } }
   * { box-sizing: border-box; }
   body { margin:0; padding:12px; font:15px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--fg); }
-  header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  header { display:flex; align-items:center; gap:8px; margin-bottom:10px; position:sticky; top:0; background:var(--bg); padding:6px 0; z-index:5; }
   header h1 { font-size:16px; margin:0; flex:1; }
-  .pill { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:2px 8px; }
+  .pill { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:2px 8px; white-space:nowrap; }
   button { font:inherit; padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
   button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; margin-bottom:10px; }
-  .meta { font-size:12px; color:var(--dim); display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+  button.ghost { padding:3px 10px; font-size:12px; border-radius:999px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+  .card-head { display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer; }
+  .card-head .time { font-size:13px; font-weight:600; }
+  .card-head .tag { font-size:11px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:0 6px; }
+  .card-head .spacer { flex:1; }
+  .badge { font-size:11px; border-radius:999px; padding:1px 7px; border:1px solid var(--line); color:var(--dim); }
+  .badge.answered { color:#fff; background:var(--accent); border-color:var(--accent); }
+  .body { display:none; padding:0 10px 10px; }
+  .card.open .body { display:block; }
   img.shot { width:100%; border-radius:8px; display:block; background:#000; cursor:zoom-in; }
   img.shot.zoom { cursor:zoom-out; }
   .label { font-size:12px; color:var(--dim); margin:8px 0 4px; }
   pre { margin:0; white-space:pre-wrap; word-break:break-word; font:13px/1.5 ui-monospace, "Cascadia Mono", monospace; background:transparent; }
   .answer { border-left:3px solid var(--accent); padding-left:8px; }
+  .preview { font-size:13px; color:var(--dim); padding:0 10px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .empty { color:var(--dim); text-align:center; padding:24px 0; }
-  .old { display:flex; gap:8px; align-items:center; padding:6px 0; border-top:1px solid var(--line); font-size:13px; }
-  .old img { width:56px; height:36px; object-fit:cover; border-radius:4px; }
-  .old:first-child { border-top:none; }
-  .row { display:flex; justify-content:flex-end; margin-top:6px; }
-  button.ghost { padding:3px 10px; font-size:12px; border-radius:999px; }
-  a { color:var(--accent); }
+  .row { display:flex; justify-content:flex-end; gap:6px; margin-top:8px; }
 </style>
 </head>
 <body>
@@ -39,13 +43,19 @@
 <div id="app"><div class="empty">还没有截图</div></div>
 <script>
   var TOKEN = new URLSearchParams(location.search).get("k") || "";
+  var lastPayload = "";
+  var lastData = null;
+  var expanded = {};
+  var firstRender = true;
+  var latestAnswer = null;
+
   function api(path, options) {
     var url = path + (path.indexOf("?") >= 0 ? "&" : "?") + "k=" + encodeURIComponent(TOKEN);
     return fetch(url, options);
   }
   function esc(text) {
-    return String(text == null ? "" : text).replace(/[&<>]/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c];
+    return String(text == null ? "" : text).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
     });
   }
   function fmt(ms) {
@@ -53,34 +63,76 @@
     var d = new Date(ms);
     return d.toLocaleTimeString("zh-CN", { hour12: false });
   }
-  var latestAnswer = null;
+  function status(text) {
+    document.getElementById("status").textContent = text;
+  }
 
-  function card(item, newest) {
-    var html = '<div class="card">';
-    html += '<div class="meta"><span>' + fmt(item.at) + '</span>';
-    if (item.backend) html += '<span>' + esc(item.backend) + '</span>';
-    if (item.target) html += '<span>' + esc(item.target) + '</span>';
-    if (item.width) html += '<span>' + item.width + '×' + item.height + '</span>';
-    html += '</div>';
-    html += '<img class="shot" loading="lazy" onerror="this.style.display=&#39;none&#39;;this.insertAdjacentHTML(&#39;beforebegin&#39;,&#39;<div class=label>图片已被清理（只保留最近 40 张）</div>&#39;)" src="/img?id=' + encodeURIComponent(item.id) +
-            '&k=' + encodeURIComponent(TOKEN) + '" onclick="this.classList.toggle(\'zoom\')">';
-    html += '<div class="row"><button class="ghost" onclick="resendItem(\'' + esc(item.id) + '\')">补发这张图</button></div>';
-    if (item.text) html += '<div class="label">识别文字</div><pre>' + esc(item.text) + '</pre>';
+  function answerBlock(item, open, newest) {
     if (item.answer) {
-      html += '<div class="label">回答' + (item.answerAt ? ' · ' + fmt(item.answerAt) : '') + '</div>';
-      html += '<pre class="answer">' + esc(item.answer) + '</pre>';
-    } else if (newest && latestAnswer && latestAnswer.text) {
-      // 回复已经来了、但没绑定到这张图（比如连拍两张）：先把它显示出来，别让手机干等。
-      html += '<div class="label">会话最新回答' + (latestAnswer.at ? ' · ' + fmt(latestAnswer.at) : '') + '</div>';
-      html += '<pre class="answer">' + esc(latestAnswer.text) + '</pre>';
-      html += '<div class="meta"><span>这条回答没有绑定到本图，可能对应上一张截图</span></div>';
-    } else if (newest) {
-      html += '<div class="label">回答</div><div class="empty" style="padding:8px 0">等待模型回复…</div>';
+      if (!open) {
+        var first = String(item.answer).split("\n")[0];
+        return '<div class="preview">回答 · ' + (item.answerAt ? fmt(item.answerAt) + ' · ' : '') +
+          esc(first.length > 46 ? first.slice(0, 46) + '…' : first) + '</div>';
+      }
+      return '<div class="label">回答' + (item.answerAt ? ' · ' + fmt(item.answerAt) : '') + '</div>' +
+        '<pre class="answer">' + esc(item.answer) + '</pre>';
+    }
+    if (newest && latestAnswer && latestAnswer.text) {
+      return '<div class="label">会话最新回答' + (latestAnswer.at ? ' · ' + fmt(latestAnswer.at) : '') + '</div>' +
+        '<pre class="answer">' + esc(latestAnswer.text) + '</pre>' +
+        '<div class="meta"><span>这条回答没有绑定到本图，可能对应上一张截图</span></div>';
+    }
+    return '<div class="preview">' + (newest ? '等待模型回复…' : '没有回答（可能超时或未绑定）') + '</div>';
+  }
+
+  function card(item, open, newest) {
+    var cls = 'card' + (open ? ' open' : '');
+    var html = '<div class="' + cls + '" data-id="' + esc(item.id) + '">';
+    html += '<div class="card-head" onclick="toggleCard(\'' + esc(item.id) + '\')">';
+    html += '<span class="time">' + fmt(item.at) + '</span>';
+    if (item.backend) html += '<span class="tag">' + esc(item.backend) + '</span>';
+    if (item.target) html += '<span class="tag">' + esc(item.target) + '</span>';
+    if (item.width) html += '<span class="tag">' + item.width + '×' + item.height + '</span>';
+    html += '<span class="spacer"></span>';
+    html += item.answer ? '<span class="badge answered">有回答</span>' : '<span class="badge">无回答</span>';
+    html += '</div>';
+    if (open) {
+      html += '<div class="body">';
+      html += '<img class="shot" loading="lazy" onerror="this.style.display=\'none\'" src="/img?id=' +
+        encodeURIComponent(item.id) + '&k=' + encodeURIComponent(TOKEN) +
+        '" onclick="this.classList.toggle(\'zoom\')">';
+      html += answerBlock(item, true, newest);
+      if (item.text) html += '<div class="label">识别文字</div><pre>' + esc(item.text) + '</pre>';
+      html += '<div class="row"><button class="ghost" onclick="resendItem(\'' + esc(item.id) + '\')">补发这张图</button></div>';
+      html += '</div>';
+    } else {
+      html += answerBlock(item, false, newest);
     }
     html += '</div>';
     return html;
   }
-  var lastPayload = "";
+
+  function render(data) {
+    var app = document.getElementById("app");
+    if (!data.items || data.items.length === 0) {
+      app.innerHTML = '<div class="empty">还没有截图</div>';
+      return;
+    }
+    var items = data.items.slice().reverse();
+    latestAnswer = data.latestAnswer || null;
+    var html = "";
+    for (var i = 0; i < items.length; i += 1) {
+      html += card(items[i], expanded[items[i].id] === true, i === 0);
+    }
+    var scroll = window.scrollY;
+    app.innerHTML = html;
+    window.scrollTo(0, scroll);
+  }
+
+  function toggleCard(id) {
+    expanded[id] = !expanded[id];
+    if (lastData) render(lastData);
+  }
 
   async function resendItem(id) {
     try {
@@ -90,61 +142,31 @@
         body: JSON.stringify({ id: id }),
       });
       var data = await response.json();
-      document.getElementById("status").textContent = data.ok ? "已排队补发" : "补发失败";
+      status(data.ok ? "已排队补发" : "补发失败");
     } catch (error) {
-      document.getElementById("status").textContent = "补发失败";
+      status("补发失败");
     }
-  }
-  var lastTickAt = 0;
-
-  function status(text) {
-    document.getElementById("status").textContent = text;
-  }
-
-  function clock() {
-    var d = new Date();
-    return d.toLocaleTimeString("zh-CN", { hour12: false });
   }
 
   async function tick() {
-    // A hidden tab is throttled to ~1/minute by every mobile browser; skip the
-    // fetch and refresh immediately when the page becomes visible again.
     if (document.visibilityState === "hidden") return;
     try {
       var response = await api("/api/state");
       if (!response.ok) throw new Error("HTTP " + response.status);
       var data = await response.json();
-      lastTickAt = Date.now();
       var payload = JSON.stringify(data);
       if (payload === lastPayload) {
-        status((data.session ? "会话在线" : "会话未打开") + " · " + clock());
+        status((data.session ? "会话在线" : "会话未打开") + " · " + fmt(Date.now()));
         return;
       }
       lastPayload = payload;
-      var app = document.getElementById("app");
-      if (!data.items || data.items.length === 0) {
-        app.innerHTML = '<div class="empty">还没有截图</div>';
-        status((data.session ? "会话在线" : "会话未打开") + " · " + clock());
-        return;
+      lastData = data;
+      if (firstRender && data.items && data.items.length > 0) {
+        expanded[data.items[data.items.length - 1].id] = true;  // 最新一张默认展开
+        firstRender = false;
       }
-      var items = data.items.slice().reverse();
-      latestAnswer = data.latestAnswer || null;
-      var html = card(items[0], true);
-      if (items.length > 1) {
-        html += '<div class="card"><div class="label">历史</div>';
-        for (var i = 1; i < items.length; i += 1) {
-          var it = items[i];
-          html += '<div class="old"><img onerror="this.style.visibility=&#39;hidden&#39;" src="/img?id=' + encodeURIComponent(it.id) +
-                  '&k=' + encodeURIComponent(TOKEN) + '"><span>' + fmt(it.at) + ' · ' +
-                  (it.answer ? "有回答" : "无回答") + '</span></div>';
-        }
-        html += '</div>';
-      }
-      var scrolled = window.scrollY > 40;
-      var previous = window.scrollY;
-      app.innerHTML = html;
-      if (scrolled) window.scrollTo(0, previous);
-      status((data.session ? "会话在线" : "会话未打开") + " · " + clock());
+      render(data);
+      status((data.session ? "会话在线" : "会话未打开") + " · " + fmt(Date.now()));
     } catch (error) {
       status("离线");
     }
@@ -154,7 +176,6 @@
     if (document.visibilityState === "visible") void tick();
   });
   window.addEventListener("online", function () { void tick(); });
-
   document.getElementById("shoot").addEventListener("click", async function () {
     var button = this;
     button.disabled = true;
@@ -171,7 +192,6 @@
   });
   tick();
   setInterval(tick, 1200);
-  setInterval(function () { if (document.visibilityState === "visible" && Date.now() - lastTickAt > 4000) void tick(); }, 4000);
 </script>
 </body>
 </html>
