@@ -6,7 +6,7 @@
 
 ## 安装
 
-包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.15.3`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
+包名是 **`dsh-screenshot-bridge`**，当前发布版本 **`1.15.4`**。它是独立 DSH 插件，只依赖 DSH 运行时和 Windows PowerShell，不依赖其他本地插件。
 
 **方式一：DSH 内置安装器，输入包名（推荐）**
 
@@ -274,7 +274,7 @@ git push -u origin main
 
 也可以在 GitHub 网页新建空仓库后执行最后两行；如果装了 GitHub CLI，可用 `gh repo create dsh-screenshot-bridge --public --source=. --push`。
 
-当前 npm 版本是 `1.15.3`。后续发布：
+当前 npm 版本是 `1.15.4`。后续发布：
 
 ```powershell
 npm version patch
@@ -282,6 +282,7 @@ npm publish --access public
 ```
 
 npm 已不再提供 Classic / Automation token；直接发布需要账号开启 2FA，或使用带 **Bypass 2FA** 的 Granular Access Token。`package.json` 的 `author` / `repository` / `homepage` 已指向 `huangnaonao112/dsh-screenshot-bridge`；仓库改名时同步更新。GitHub 仓库用于查看源码和提交 issue，安装优先用上面的 npm 包名。
+
 
 
 

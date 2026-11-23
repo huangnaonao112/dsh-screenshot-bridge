@@ -1457,7 +1457,12 @@ function assistantEvents(session) {
           .map((block) => block.text)
           .join("\n")
           .trim();
-        return { seq: Number(event.seq) || 0, id: String(event.data?.message?.id ?? ""), text };
+        return {
+          seq: Number(event.seq) || 0,
+          turn: Number(event.data?.turn ?? 0),
+          id: String(event.data?.message?.id ?? ""),
+          text,
+        };
       })
       .filter((row) => row.text !== "");
   } catch {
@@ -1471,24 +1476,40 @@ function lastAssistant(session) {
 }
 
 /** Watch the target conversation for the reply that follows this capture. */
+function sessionTurn(session) {
+  try {
+    let turn = 0;
+    for (const event of session.ownEvents()) {
+      const value = Number(event?.data?.turn ?? 0);
+      if (Number.isFinite(value) && value > turn) turn = value;
+    }
+    return turn;
+  } catch {
+    return 0;
+  }
+}
+
 function watchAnswer(state, capture) {
   if (state.settings.sessionId === "") return;
   const session = sessionOf(state);
   if (session === null) return;
-  const events = assistantEvents(session);
-  const baselineSeq = events.length > 0 ? events[events.length - 1].seq : Number(session.seq ?? 0);
   if (state.pendingAnswers === undefined) state.pendingAnswers = new Map();
   if (state.answerSeqs === undefined) state.answerSeqs = new Set();
-  state.pendingAnswers.set(capture.id, { baselineSeq, startedAt: Date.now() });
+  state.pendingAnswers.set(capture.id, {
+    baselineTurn: sessionTurn(session),
+    startedAt: Date.now(),
+    seen: new Set(),
+    parts: 0,
+  });
   if (state.answerPoller === undefined || state.answerPoller === null) {
     state.answerPoller = setInterval(() => pollAnswers(state), 900);
   }
 }
 
 /**
- * One tick for every capture waiting on a reply.
- * 按 seq 归属：一条回复只给"基线 seq 比它小、且最接近它"的那张图，
- * 不再用"最后一条消息 id"去猜；这样连拍两张也不会把 A 的答案挂到 B 上。
+ * 一次截图最多产生两轮回答：先发文字（turn N+1），再补图（turn N+2）。
+ * 这里按 turn 收集这两轮里的所有 assistant 消息，追加到同一张图的答案里；
+ * 出现 N+3 说明下一张图已经开始了，关闭这条等待。
  */
 function pollAnswers(state) {
   const pending = state.pendingAnswers;
@@ -1503,23 +1524,37 @@ function pollAnswers(state) {
     return;
   }
   const session = sessionOf(state);
-  if (session === null) return;  // 会话暂时不可见就继续等，不放弃
+  if (session === null) return;
   const events = assistantEvents(session);
-  const jobs = [...pending.entries()].sort((left, right) => left[1].baselineSeq - right[1].baselineSeq);
-  for (const [captureId, job] of jobs) {
+  for (const [captureId, job] of pending) {
     if (Date.now() - job.startedAt > 30 * 60_000) {
       pending.delete(captureId);
-      void log(state, "answer-timeout", { id: captureId, baselineSeq: job.baselineSeq }).catch(() => {});
+      void log(state, "answer-timeout", { id: captureId, baselineTurn: job.baselineTurn }).catch(() => {});
       continue;
     }
-    const reply = events.find((row) => row.seq > job.baselineSeq && !state.answerSeqs.has(row.seq));
-    if (reply === undefined) continue;
-    state.answerSeqs.add(reply.seq);
-    const shot = state.captures.find((entry) => entry.id === captureId);
-    const latency = shot === undefined ? null : Date.now() - shot.at;
-    state.answers.set(captureId, { text: reply.text, at: Date.now(), latency });
-    void log(state, "answer", { id: captureId, seq: reply.seq, ms: latency }).catch(() => {});
-    pending.delete(captureId);
+    // 新的用户轮次（下一张图）出现 → 这张图不再等新回答
+    if (events.some((row) => row.turn > job.baselineTurn + 2)) {
+      pending.delete(captureId);
+      continue;
+    }
+    let appended = false;
+    for (const row of events) {
+      if (row.turn <= job.baselineTurn || row.turn > job.baselineTurn + 2) continue;
+      if (job.seen.has(row.seq) || state.answerSeqs.has(row.seq)) continue;
+      job.seen.add(row.seq);
+      state.answerSeqs.add(row.seq);
+      const previous = state.answers.get(captureId);
+      const text = previous === undefined
+        ? row.text
+        : previous.text + "\n\n【补图回答】\n" + row.text;
+      job.parts += 1;
+      const shot = state.captures.find((entry) => entry.id === captureId);
+      const latency = shot === undefined ? null : Date.now() - shot.at;
+      state.answers.set(captureId, { text, at: Date.now(), latency });
+      appended = true;
+      void log(state, "answer", { id: captureId, turn: row.turn, seq: row.seq, ms: latency }).catch(() => {});
+    }
+    if (appended && job.parts >= 2) pending.delete(captureId);
   }
 }
 
