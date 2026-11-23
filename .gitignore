@@ -11,6 +11,7 @@ bridge.log
 dist/
 *.tmp
 *.part
+*.tgz
 # optional high-accuracy models (132 MB, `npm run models:medium` 才会下)
 models/medium/
 # editor / OS noise

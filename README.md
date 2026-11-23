@@ -32,6 +32,15 @@ https://github.com/huangnaonao112/dsh-screenshot-bridge
 
 如果安装器提示需要 SSH 凭据，改用方式一的包名；本机 npm 对 `github:` 简写默认会走 SSH，没配公钥会失败。
 
+**方式零（npm 2FA 未批时的等价安装）**：直接从 GitHub 装，内容与 npm 包完全一致。
+
+```powershell
+cd ~/.dsh/profiles/<profile>
+npm install github:huangnaonao112/dsh-screenshot-bridge#v1.15.0
+# 或
+npm install https://github.com/huangnaonao112/dsh-screenshot-bridge/releases/download/v1.15.0/dsh-screenshot-bridge-1.15.0.tgz
+```
+
 **方式三：命令行安装**
 
 ```powershell
