@@ -235,19 +235,30 @@ npm run matrix     # 只跑 32 个合成变体
 - 题面提取的引擎是本插件的 npm 依赖（`rapidocr-node` + `onnxruntime-node` + `sharp`）+ 自带的 `models/`，装完即用；起不来时不会报错，只是退回发图。固有短板：填空下划线 `____` 会丢；OCR 认错题号时图可能挂错题；套在深色主题里的浅色文字可能被墨迹阈值漏掉；题目在表格里、或图与文字完全重叠时可能切错；一行被压得很长的续行会单独成行而不并回上一句。这些都写进 `bridge.log` 的 `extract` 行，`ok:false` 时一定会退回发图。
 - **表格**：页面上有框线（横线 ≥3 条、竖线 ≥2 条）时，会把 OCR 的行按单元格重新排成 `a | b | c`，附在正文后面，标题为`【表格重排】N 列`。没有框线、只靠空格的表格仍然只能靠"整页文字 + 原图必发"兜着——这条要用版面检测模型才能解，而 PaddleOCR 的 PP-DocLayout 官方只发 paddle 权重，唯一现成的 ONNX 单个就 204 MB，和「纯 npm、别人装走即用」冲突，所以先用框线规则解掉最常见的一类（真题里的统计表都带框线）。
 
-#### npm token 保存在插件目录（DPAPI 加密）
+#### npm token 放在 DSH 一级目录（DPAPI 加密，所有插件共用）
 
-```powershell
-pwsh -File npm-auth.ps1 save "npm_xxx"   # 加密存到 .npm-token.dpapi（仅当前 Windows 用户可解）
-pwsh -File npm-auth.ps1 status           # 只看掩码 + whoami
-pwsh -File npm-auth.ps1 restore          # 写回 %USERPROFILE%\.npmrc
-pwsh -File npm-auth.ps1 publish          # restore + npm publish --access public
-pwsh -File npm-auth.ps1 forget           # 删除已保存的 token
+token 属于 npm 账号，不属于某个插件，所以真正的密文和工具都放在 DSH home：
+
+```
+%USERPROFILE%\.dsh\npm-token.dpapi    ← DPAPI（CurrentUser）密文，只在本机本用户可解
+%USERPROFILE%\.dsh\npm-auth.ps1       ← 真正干活的脚本
 ```
 
-- 密文用 **DPAPI（CurrentUser）**，换账号/换机器都解不开；文件 ACL 只给当前用户；
-- `.npm-token.dpapi`、`.npm-token`、`.npmrc.before-*` 都在 `.gitignore` 和 `.npmignore` 里，不会进 git，也不会进 npm 包；
-- 发布前会自动把 `.npmrc` 备份成 `.npmrc.before-restore`。
+任何插件目录里都能直接调用：
+
+```powershell
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" save "npm_xxx"   # 加密保存（或从 .npmrc 自动读取）
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" status           # 掩码 + whoami
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" restore          # 写回 %USERPROFILE%\.npmrc
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" publish          # 发布当前目录的这个插件
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" where            # 打印路径与解析到的 npm
+pwsh "$env:USERPROFILE\.dsh\npm-auth.ps1" forget           # 删除已保存的 token
+```
+
+插件目录里的 `npm-auth.ps1` 只是转发到上面这个共享脚本，旧写法依然可用；
+
+- 密文与 git / npm 打包无关（不在任何仓库目录里）；`.npmrc` 发布前会备份为 `.npmrc.before-restore`；
+- `publish` 会自己找 npm CLI：当前目录的 `.toolchain/npm` → 已知 node 安装 → PATH。
 
 ## 发布到 GitHub
 
