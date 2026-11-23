@@ -6,3 +6,6 @@
 bin/.shots/
 *.log
 *.tgz
+.npm-token.dpapi
+.npm-token
+.npmrc.before-*

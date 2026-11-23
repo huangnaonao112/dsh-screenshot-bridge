@@ -21,3 +21,6 @@ Thumbs.db
 .vscode/
 .toolchain/
 .fig-test/
+.npm-token.dpapi
+.npm-token
+.npmrc.before-*
